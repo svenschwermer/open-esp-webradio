@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "/opt/esp-open-sdk/xtensa-lx106-elf/xtensa-lx106-elf/sysroot/usr/include",
+                "/opt/esp-open-sdk/xtensa-lx106-elf/lib/gcc/xtensa-lx106-elf/4.8.5/include",
+                "${workspaceRoot}/esp-open-rtos/core/include",
+                "${workspaceRoot}/esp-open-rtos/include",
+                "${workspaceRoot}/esp-open-rtos/FreeRTOS/Source/include",
+                "${workspaceRoot}/esp-open-rtos/FreeRTOS/Source/portable/esp8266",
+                "${workspaceRoot}/esp-open-rtos/extras",
+                "${workspaceRoot}/include"
+            ],
+            "defines": [],
+            "intelliSenseMode": "clang-x64",
+            "browse": {
+                "path": [
+                    "/opt/esp-open-sdk/xtensa-lx106-elf",
+                    "${workspaceRoot}"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": ""
+            }
+        }
+    ],
+    "version": 3
+}
