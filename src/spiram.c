@@ -9,32 +9,30 @@
 #define HSPI_NUM			1
 
 #ifndef SPIRAM_QIO_HACK
-static void spi_byte_write(uint8 spi_no,uint8 data) IRAM;
-static void spi_byte_write(uint8 spi_no,uint8 data)
+static void spi_byte_write(unsigned int spi_no, uint32_t data) IRAM;
+static void spi_byte_write(unsigned int spi_no, uint32_t data)
 {
-	uint32 regvalue;
+	// handle invalid input number
+	if(spi_no > 1)
+		return;
 
-	if(spi_no>1) return; //handle invalid input number
-
-	while(READ_PERI_REG(SPI_CMD(spi_no))&SPI_USR);
+	while(READ_PERI_REG(SPI_CMD(spi_no)) & SPI_USR);
 	SET_PERI_REG_MASK(SPI_USER(spi_no), SPI_USR_COMMAND);
 	CLEAR_PERI_REG_MASK(SPI_USER(spi_no), SPI_USR_MOSI|SPI_USR_MISO|SPI_USR_DUMMY|SPI_USR_ADDR);
 
 	//SPI_FLASH_USER2 bit28-31 is cmd length,cmd bit length is value(0-15)+1,
 	// bit15-0 is cmd value.
-	WRITE_PERI_REG(SPI_USER2(spi_no), 
-			((7&SPI_USR_COMMAND_BITLEN)<<SPI_USR_COMMAND_BITLEN_S)|((uint32)data));
+	WRITE_PERI_REG(SPI_USER2(spi_no), ((SPI_USR_COMMAND_BITLEN & 0x7) << SPI_USR_COMMAND_BITLEN_S) | data);
 	SET_PERI_REG_MASK(SPI_CMD(spi_no), SPI_USR);
-	while(READ_PERI_REG(SPI_CMD(spi_no))&SPI_USR);
+	while(READ_PERI_REG(SPI_CMD(spi_no)) & SPI_USR);
 }
 #endif
 
 #ifdef SPIRAM_QIO_HACK
-static void spi_ram_eqio() IRAM;
-static void spi_ram_eqio()
+static void spiram_setup_eqio() IRAM;
+static void spiram_setup_eqio()
 {
-	int i;
-	char eqio = 0x38; // ENTER SQI MODE (EQIO) FROM SPI_NUM MODE
+	const char eqio = 0x38; // ENTER SQI MODE (EQIO) FROM SPI_NUM MODE
 
 	taskENTER_CRITICAL();
 
@@ -54,7 +52,7 @@ static void spi_ram_eqio()
 	gpio_write(6, false); // CLK low
 	gpio_write(0, false); // CS low -> select 23LC1024
 
-	for(i=7; i>=0; --i)
+	for(int i=7; i>=0; --i)
 	{
 		if(eqio & (1<<i))
 			gpio_write(7, true); // bit=1 -> MOSI high
@@ -74,14 +72,16 @@ static void spi_ram_eqio()
 #endif
 
 //Initialize the SPI_NUM port to talk to the chip.
-void spiRamInit()
+void spiram_init()
 {
 	char dummy[128];
 
 	taskENTER_CRITICAL();
 
 #ifdef SPIRAM_QIO_HACK
-	spi_ram_eqio();
+	// Since MISO and MOSI are swapped, we can't use a HW SPI for switching the SPI RAM to
+	// EQIO mode. That's why we need to bitbang.
+	spiram_setup_eqio();
 #endif
 
 	//hspi overlap to spi, two spi masters on cspi
@@ -118,21 +118,18 @@ void spiRamInit()
 	taskEXIT_CRITICAL();
 
 	//Dummy read to clear any weird state the SPI_NUM ram chip may be in
-	spiRamRead(0x0, dummy, sizeof(dummy));
+	spiram_read(0x0, dummy, sizeof(dummy));
 }
 
 //Macro to quickly access the W-registers of the SPI peripherial
-#define SPI_W(i, j)                   (REG_SPI_BASE(i) + 0x40 + ((j)*4))
-
+#define SPI_W(i, j) (SPI_W0(i) + ((j)*4))
 
 //Read bytes from a memory location. The max amount of bytes that can be read is 64.
-int spiRamRead(int addr, char *buff, int len)
+size_t spiram_read(uint32_t addr, void *buf, size_t len)
 {
-	int d;
-	int i=0;
-
-	const int read_len = (len > 64) ? 64 : len;
-	len = read_len;
+	uint8_t *byte_buf = buf;
+	if (len > 64)
+		len = 64;
 
 	taskENTER_CRITICAL();
 
@@ -165,34 +162,34 @@ int spiRamRead(int addr, char *buff, int len)
 	SET_PERI_REG_MASK(SPI_CMD(HSPI_NUM), SPI_USR);
 	while(READ_PERI_REG(SPI_CMD(HSPI_NUM))&SPI_USR) ;
 	//Unaligned dest address. Copy 8bit at a time
-	while (len > 0)
+	for (size_t i=0; i < len;)
 	{
-		d=READ_PERI_REG(SPI_W(HSPI_NUM, i));
-		buff[i*4+0]=(d>>0)&0xff;
-		if (len>=1) buff[i*4+1]=(d>>8)&0xff;
-		if (len>=2) buff[i*4+2]=(d>>16)&0xff;
-		if (len>=3) buff[i*4+3]=(d>>24)&0xff;
-		len-=4;
-		i++;
+		uint32_t d = READ_PERI_REG(SPI_W(HSPI_NUM, i/4));
+		byte_buf[i++] = d & 0xff;
+		if (i < len)
+			byte_buf[i++] = (d>>8) & 0xff;
+		if (i < len)
+			byte_buf[i++] = (d>>16) & 0xff;
+		if (i < len)
+			byte_buf[i++] = (d>>24) & 0xff;
 	}
 
 	taskEXIT_CRITICAL();
 
-	return read_len;
+	return len;
 }
 
 //Write bytes to a memory location. The max amount of bytes that can be written is 64.
-int spiRamWrite(int addr, const char *buff, int len)
+size_t spiram_write(uint32_t addr, const void *buf, size_t len)
 {
-	int i;
-	int d;
-
+	const uint8_t *byte_buf = buf;
 	if(len > 64)
 		len = 64;
 
 	taskENTER_CRITICAL();
 
-	while(READ_PERI_REG(SPI_CMD(HSPI_NUM))&SPI_USR) ;
+	while(READ_PERI_REG(SPI_CMD(HSPI_NUM)) & SPI_USR);
+
 #ifndef SPIRAM_QIO
 	SET_PERI_REG_MASK(SPI_USER(HSPI_NUM), SPI_CS_SETUP|SPI_CS_HOLD|SPI_USR_COMMAND|SPI_USR_ADDR|SPI_USR_MOSI);
 	CLEAR_PERI_REG_MASK(SPI_USER(HSPI_NUM), SPI_FLASH_MODE|SPI_USR_MISO);
@@ -223,12 +220,15 @@ int spiRamWrite(int addr, const char *buff, int len)
 #endif
 
 	//Assume unaligned src: Copy byte-wise.
-	for (i=0; i<(len+3)/4; i++) {
-		d=buff[i*4+0]<<0;
-		d|=buff[i*4+1]<<8;
-		d|=buff[i*4+2]<<16;
-		d|=buff[i*4+3]<<24;
-		WRITE_PERI_REG(SPI_W(HSPI_NUM, (i)), d);
+	for (size_t i=0; i < len;) {
+		uint32_t d = byte_buf[i++];
+		if (i < len)
+			d |= ((uint32_t) byte_buf[i++]) << 8;
+		if (i < len)
+			d |= ((uint32_t) byte_buf[i++]) << 16;
+		if (i < len)
+			d |= ((uint32_t) byte_buf[i++]) << 24;
+		WRITE_PERI_REG(SPI_W(HSPI_NUM, (i - 1) / 4), d);
 	}
 	SET_PERI_REG_MASK(SPI_CMD(HSPI_NUM), SPI_USR);
 
@@ -237,10 +237,9 @@ int spiRamWrite(int addr, const char *buff, int len)
 	return len;
 }
 
-
 //Simple routine to see if the SPI_NUM actually stores bytes. This is not a full memory test, but will tell
 //you if the RAM chip is connected well.
-int spiRamTest()
+int spiram_test()
 {
 	int x;
 	int err=0;
@@ -252,11 +251,11 @@ int spiRamTest()
 		a[x]=x^(x<<2);
 		b[x]=0xaa^x;
 	}
-	spiRamWrite(0x0, a, 64);
-	spiRamWrite(0x100, b, 64);
+	spiram_write(0x0, a, 64);
+	spiram_write(0x100, b, 64);
 
-	spiRamRead(0x0, a, 64);
-	spiRamRead(0x100, b, 64);
+	spiram_read(0x0, a, 64);
+	spiram_read(0x100, b, 64);
 	for (x=0; x<64; x++)
 	{
 		aa=x^(x<<2);
@@ -274,9 +273,9 @@ int spiRamTest()
 	}
 
 	char buf[2] = {0x55, 0xaa};
-	spiRamWrite(0x1, buf, 1);
-	spiRamWrite(0x2, buf, 2);
-	spiRamRead(0x1, buf+1, 1);
+	spiram_write(0x1, buf, 1);
+	spiram_write(0x2, buf, 2);
+	spiram_read(0x1, buf+1, 1);
 	if(buf[0] != buf[1])
 	{
 		err=1;

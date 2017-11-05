@@ -5,118 +5,105 @@
 #include "semphr.h"
 #include "task.h"
 
-#include <stdlib.h>
+#define FIFO_SIZE SPIRAM_SIZE
 
-#define FIFO_SIZE SPIRAMSIZE
-
-static uint32_t writePos = 0;
-static uint32_t readPos = 0;
+static uint32_t write_pos = 0;
+static uint32_t read_pos = 0;
 static uint32_t fill = 0;
 
 static SemaphoreHandle_t mtx;
-//static xTaskHandle xProducerWaiting = NULL;
-static SemaphoreHandle_t semphrWrite;
-//static xTaskHandle xConsumerWaiting = NULL;
-static SemaphoreHandle_t semphrRead;
+static TaskHandle_t producer_waiting = NULL;
+static TaskHandle_t consumer_waiting = NULL;
 
 int fifo_init(void)
 {
 	mtx = xSemaphoreCreateMutex();
-	vSemaphoreCreateBinary(semphrWrite);
-	vSemaphoreCreateBinary(semphrRead);
+	if (mtx == NULL)
+		return 1;
 
-	spiRamInit();
+	spiram_init();
 
-	return spiRamTest();
+	return spiram_test();
 }
 
-static inline int fifo_enqueue_internal(const void * const data, const uint32_t len) // aka produce
+static inline size_t fifo_enqueue_internal(const void * const data, const size_t len) // aka produce
 {
-	int written;
-
 	xSemaphoreTake(mtx, portMAX_DELAY);
 
-	while(len > (FIFO_SIZE - fill) )
+	const size_t free = FIFO_SIZE - fill;
+	while(len > free)
 	{
-		//xProducerWaiting = xTaskGetCurrentTaskHandle();
+		producer_waiting = xTaskGetCurrentTaskHandle();
 		xSemaphoreGive(mtx);
-		//ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		xSemaphoreTake(semphrWrite, portMAX_DELAY);
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		xSemaphoreTake(mtx, portMAX_DELAY);
 	}
 
-	written = spiRamWrite(writePos, data, len);
-	writePos = (writePos + written) % FIFO_SIZE;
+	size_t written = spiram_write(write_pos, data, len);
+	write_pos = (write_pos + written) % FIFO_SIZE;
 	fill += written;
 
-	/*
-	if(xConsumerWaiting != NULL)
+	if(consumer_waiting != NULL)
 	{
-		xTaskNotifyGive(xConsumerWaiting);
-		xConsumerWaiting = NULL;
+		xTaskNotifyGive(consumer_waiting);
+		consumer_waiting = NULL;
 	}
-	*/
-	xSemaphoreGive(semphrRead);
 
 	xSemaphoreGive(mtx);
 
 	return written;
 }
 
-void fifo_enqueue(const void *data, uint32_t len)
+void fifo_enqueue(const void *data, size_t len)
 {
+	const uint8_t *byte_buf = data;
 	while(len > 0)
 	{
-		const int written = fifo_enqueue_internal(data, len);
-		data = ( (const char *) data ) + written;
+		const size_t written = fifo_enqueue_internal(byte_buf, len);
+		byte_buf += written;
 		len -= written;
 	}
 }
 
-static inline int fifo_dequeue_internal(void * const data, const uint32_t len) // aka consume
+static inline size_t fifo_dequeue_internal(void * const data, const size_t len) // aka consume
 {
-	int read;
-
 	xSemaphoreTake(mtx, portMAX_DELAY);
 
 	while(len > fill)
 	{
-		//xConsumerWaiting = xTaskGetCurrentTaskHandle();
+		consumer_waiting = xTaskGetCurrentTaskHandle();
 		xSemaphoreGive(mtx);
-		//ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		xSemaphoreTake(semphrRead, portMAX_DELAY);
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		xSemaphoreTake(mtx, portMAX_DELAY);
 	}
 
-	read = spiRamRead(readPos, data, len);
-	readPos = (readPos + read) % FIFO_SIZE;
+	size_t read = spiram_read(read_pos, data, len);
+	read_pos = (read_pos + read) % FIFO_SIZE;
 	fill -= read;
 
-	/*
-	if(xProducerWaiting != NULL)
+	if(producer_waiting != NULL)
 	{
-		xTaskNotifyGive(xProducerWaiting);
-		xProducerWaiting = NULL;
+		xTaskNotifyGive(producer_waiting);
+		producer_waiting = NULL;
 	}
-	*/
-	xSemaphoreGive(semphrWrite);
 
 	xSemaphoreGive(mtx);
 
 	return read;
 }
 
-void fifo_dequeue(void *data, uint32_t len)
+void fifo_dequeue(void *data, size_t len)
 {
+	uint8_t *byte_buf = data;
 	while(len > 0)
 	{
-		const int read = fifo_dequeue_internal(data, len);
-		data = ( (char *) data ) + read;
+		const size_t read = fifo_dequeue_internal(byte_buf, len);
+		byte_buf += read;
 		len -= read;
 	}
 }
 
-uint32_t fifo_fill(void)
+size_t fifo_fill(void)
 {
 	uint32_t ret;
 	xSemaphoreTake(mtx, portMAX_DELAY);
@@ -125,12 +112,12 @@ uint32_t fifo_fill(void)
 	return ret;
 }
 
-uint32_t fifo_free(void)
+size_t fifo_free(void)
 {
 	return FIFO_SIZE - fifo_fill();
 }
 
-uint32_t fifo_size(void)
+size_t fifo_size(void)
 {
 	return FIFO_SIZE;
 }
