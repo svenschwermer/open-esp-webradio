@@ -1,40 +1,24 @@
 #include "fifo.h"
 #include "wm8731.h"
-#include "spiram.h"
+#include "stream_client.h"
 
+#include "esp8266.h"
 #include "esp/uart.h"
 #include "esp/hwrand.h"
+#include "espressif/esp_common.h"
+#include "ssid_config.h"
+
 #include "FreeRTOS.h"
 #include "queue.h"
 #include "task.h"
-#include "esp8266.h"
-
-#include "crc_generic/crc_lib/crc_generic.h"
+#include "timers.h"
 
 #include <stdio.h>
 
-void producer_task(void *pvParameters)
-{
-    uint8_t buf[32];
-    while (true)
-    {
-        const size_t len = hwrand() % sizeof buf;
-        hwrand_fill(buf, len);
-        printf("enqueuing %u bytes\n", len);
-        fifo_enqueue(buf, len);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-    }
-}
-
-void consumer_task(void *pvParameters)
-{
-    uint8_t buf[32];
-    while (true)
-    {
-        fifo_dequeue(buf, sizeof buf);
-        printf("32 bytes dequeued\n");
-    }
-}
+static struct stream_params stream_params = {
+    .host = "icecast.omroep.nl",
+    .path = "/3fm-sb-mp3"
+};
 
 void hexdump(const void * buf, size_t len)
 {
@@ -48,50 +32,58 @@ void hexdump(const void * buf, size_t len)
     }
 }
 
-void dummy_task(void *pvParameters)
+// Continuously print fifo fill level info
+static void fifo_status_task(void *arg)
 {
-    uint8_t buf[256];
-    config_crc_8 crc;
+	while (1)
+	{
+		printf("fifo fill status: %u/%u\n", fifo_fill(), fifo_size());
+		vTaskDelay(500 / portTICK_PERIOD_MS);
+	}
+}
 
-    //init crc parameters  (MAXIM parameters)
-    crc_8_generic_init(&crc, 0x31, 8, 0x00, 0x00, 1, 1, 1);
-    crc_8_generic_select_algo(&crc, crc_8_tab_MAXIM, sizeof crc_8_tab_MAXIM, CRC_TABLE_FAST);
+uint32_t consumed_data = 0;
 
-    spiram_init();
+void datarate_timer(TimerHandle_t xTimer)
+{
+    TickType_t period_ms = xTimerGetPeriod(xTimer) * portTICK_PERIOD_MS;
+    float datarate = consumed_data;
+    consumed_data = 0;
+    datarate = datarate * 1000.f / period_ms;
+    printf("datarate: %f Bytes/s\n", datarate);
+}
 
-    while (true)
+// Just consume all the data that's being put into the FIFO
+static void consumer_task(void *arg)
+{
+    uint8_t buf[32];
+    while (1)
     {
-        const uint32_t len = hwrand() % sizeof buf;
-        const uint32_t addr = hwrand() % SPIRAM_SIZE;
-        crc_8 write_crc, read_crc;
-
-        hwrand_fill(buf, len);
-
-        printf("writing (%u bytes @ 0x%05x):\n", len, addr);
-        hexdump(buf, len);
-        write_crc = crc_8_generic_compute(&crc, buf, len);
-        printf("CRC: 0x%02x\n", write_crc);
-        for (size_t written=0; written < len;)
-            written += spiram_write((addr + written) % SPIRAM_SIZE, buf + written, len - written);
-
-        // clear buffer
-        for (size_t i=0; i < len; ++i)
-            buf[i] = 0x00;
-
-        for (size_t read=0; read < len;)
-            read += spiram_read((addr + read) % SPIRAM_SIZE, buf + read, len - read);
-        printf("read back:\n");
-        hexdump(buf, len);
-        read_crc = crc_8_generic_compute(&crc, buf, len);
-        printf("CRC: 0x%02x\n", read_crc);
-
-        if (write_crc == read_crc)
-            printf("\nCRCs match!\n\n");
-        else
-            printf("\nCRCs don't match!\n\n");
-
-        vTaskDelay(3000/portTICK_PERIOD_MS);
+        fifo_dequeue(buf, sizeof buf);
+        consumed_data += sizeof buf;
     }
+}
+
+// Just consume all the data that's being put into the FIFO
+static void init_task(void *arg)
+{
+    printf("Waiting for the WiFi to connect...\n");
+    uint8_t connection_status = STATION_IDLE;
+    while (connection_status != STATION_GOT_IP)
+    {
+        connection_status = sdk_wifi_station_get_connect_status();
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+    printf("Got IP, starting tasks...\n");
+
+    xTaskCreate(consumer_task, "consumer", 1024, NULL, 2, NULL);
+    xTaskCreate(stream_task, "producer", 1024, &stream_params, 2, NULL);
+//    xTaskCreate(fifo_status_task, "status", 1024, NULL, 2, NULL);
+
+    TimerHandle_t timer = xTimerCreate("datarate", pdMS_TO_TICKS(3000), pdTRUE, NULL, datarate_timer);
+    xTimerStart(timer, 0);
+
+    vTaskDelete(NULL);
 }
 
 void user_init(void)
@@ -103,15 +95,15 @@ void user_init(void)
     	printf("fifo init failed\n");
     	return;
     }
-/*
-    if(wm8731_init() != 0)
-    {
-    	printf("dac init failed\n");
-    	return;
-    }
-*/
-    xTaskCreate(consumer_task, "consumer", 1024, NULL, 2, NULL);
-    xTaskCreate(producer_task, "producer", 1024, NULL, 2, NULL);
 
-//    xTaskCreate(dummy_task, "dummy", 1024, NULL, 2, NULL);
+    struct sdk_station_config config = {
+        .ssid = WIFI_SSID,
+        .password = WIFI_PASS,
+    };
+
+    /* required to call wifi_set_opmode before station_set_config */
+    sdk_wifi_set_opmode(STATION_MODE);
+    sdk_wifi_station_set_config(&config);
+
+	xTaskCreate(init_task, "init", 512, NULL, 2, NULL);
 }
