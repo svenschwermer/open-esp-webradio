@@ -9,6 +9,8 @@
 #include "lwip/netdb.h"
 #include "lwip/dns.h"
 
+#include "espressif/esp_common.h"
+
 #include <string.h>
 #include <unistd.h>
 
@@ -104,6 +106,14 @@ void stream_task(void *arg)
 			.ai_socktype = SOCK_STREAM,
 	};
 	struct addrinfo *res;
+
+	printf("Waiting for DHCP...\n");
+    uint8_t connection_status = STATION_IDLE;
+    while (connection_status != STATION_GOT_IP)
+    {
+		vTaskDelay(100 / portTICK_PERIOD_MS);
+		connection_status = sdk_wifi_station_get_connect_status();
+	}
 
 	printf("Running DNS lookup for %s...\n", params->host);
 	int err = getaddrinfo(params->host, "80", &hints, &res);

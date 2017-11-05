@@ -10,8 +10,8 @@
                 "${workspaceRoot}/esp-open-rtos/FreeRTOS/Source/include",
                 "${workspaceRoot}/esp-open-rtos/FreeRTOS/Source/portable/esp8266",
                 "${workspaceRoot}/esp-open-rtos/extras",
-                "${workspaceRoot}/include",
-                "${workspaceRoot}/libmad"
+                "${workspaceRoot}",
+                "${workspaceRoot}/include"
             ],
             "defines": [],
             "intelliSenseMode": "clang-x64",
