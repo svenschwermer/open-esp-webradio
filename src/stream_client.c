@@ -86,6 +86,15 @@ static int process_response_header(const char *buf, int len)
 	return len;
 }
 
+static uint32_t total_bytes = 0;
+
+uint32_t reset_total_bytes()
+{
+	uint32_t bytes = total_bytes;
+	total_bytes = 0;
+	return bytes;
+}
+
 void stream_task(void *arg)
 {
 	struct stream_params *params = (struct stream_params *) arg;
@@ -142,8 +151,10 @@ void stream_task(void *arg)
 	while((n = read(s, buf, sizeof buf - 1)) > 0)
 	{
 		int header_bytes = process_response_header(buf, n);
-		if (header_bytes < n)
+		if (header_bytes < n) {
 			fifo_enqueue(buf + header_bytes, n - header_bytes);
+			total_bytes += n - header_bytes;
+		}
 		if (header_bytes > 0) {
 			buf[header_bytes] = '\0';
 			printf("%s", buf);

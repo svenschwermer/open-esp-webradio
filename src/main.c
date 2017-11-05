@@ -1,6 +1,7 @@
 #include "fifo.h"
 #include "wm8731.h"
 #include "stream_client.h"
+#include "mp3.h"
 
 #include "esp8266.h"
 #include "esp/uart.h"
@@ -32,35 +33,49 @@ void hexdump(const void * buf, size_t len)
     }
 }
 
-// Continuously print fifo fill level info
-static void fifo_status_task(void *arg)
-{
-	while (1)
-	{
-		printf("fifo fill status: %u/%u\n", fifo_fill(), fifo_size());
-		vTaskDelay(500 / portTICK_PERIOD_MS);
-	}
-}
+static TaskHandle_t mp3_task_hndl = NULL;
+static TaskHandle_t stream_task_hndl = NULL;
 
-uint32_t consumed_data = 0;
-
-void datarate_timer(TimerHandle_t xTimer)
+void debug_timer(TimerHandle_t xTimer)
 {
     TickType_t period_ms = xTimerGetPeriod(xTimer) * portTICK_PERIOD_MS;
-    float datarate = consumed_data;
-    consumed_data = 0;
-    datarate = datarate * 1000.f / period_ms;
-    printf("datarate: %f Bytes/s\n", datarate);
+    float freq = 1000.f / period_ms;
+    float samplerate = reset_total_samples() * freq;
+    float datarate = reset_total_bytes() * freq;
+    eTaskState state_mp3 = eTaskGetState(mp3_task_hndl);
+    eTaskState state_stream = eTaskGetState(stream_task_hndl);
+    printf("stream: %f Bytes/s\n"
+        "decoder: %f samples/s\n"
+        "fifo: %u/%u\n"
+        "states: %d,%d\n\n",
+        datarate,
+        samplerate,
+        fifo_fill(), fifo_size(),
+        state_mp3, state_stream);
 }
 
-// Just consume all the data that's being put into the FIFO
-static void consumer_task(void *arg)
+static void mp3_test(void *arg)
 {
-    uint8_t buf[32];
+    static unsigned char buffer[2106];
+    while (1) {
+        fifo_dequeue(buffer, sizeof buffer);
+        uint32_t delay = hwrand() % 4096;
+        vTaskDelay(pdMS_TO_TICKS(delay));
+    }
+}
+
+static void stream_test(void *arg)
+{
+    // produce 12000 bytes/s
+    uint8_t buf[120];
+    const TickType_t xFrequency = pdMS_TO_TICKS(10);
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+   
     while (1)
     {
-        fifo_dequeue(buf, sizeof buf);
-        consumed_data += sizeof buf;
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+        hwrand_fill(buf, sizeof buf);
+        fifo_enqueue(buf, sizeof buf);
     }
 }
 
@@ -76,13 +91,15 @@ static void init_task(void *arg)
     }
     printf("Got IP, starting tasks...\n");
 
-    xTaskCreate(consumer_task, "consumer", 1024, NULL, 2, NULL);
-    xTaskCreate(stream_task, "producer", 1024, &stream_params, 2, NULL);
-//    xTaskCreate(fifo_status_task, "status", 1024, NULL, 2, NULL);
+    if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 2, &mp3_task_hndl) != pdPASS)
+        printf("Failed to create mp3 task!\n");
 
-    TimerHandle_t timer = xTimerCreate("datarate", pdMS_TO_TICKS(3000), pdTRUE, NULL, datarate_timer);
+    if (xTaskCreate(stream_task, "producer", 1024, &stream_params, 2, &stream_task_hndl) != pdPASS)
+        printf("Failed to create stream task!\n");
+    
+    TimerHandle_t timer = xTimerCreate("debug", pdMS_TO_TICKS(3000), pdTRUE, NULL, debug_timer);
     xTimerStart(timer, 0);
-
+    
     vTaskDelete(NULL);
 }
 

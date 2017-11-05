@@ -30,8 +30,7 @@ static inline size_t fifo_enqueue_internal(const void * const data, const size_t
 {
 	xSemaphoreTake(mtx, portMAX_DELAY);
 
-	const size_t free = FIFO_SIZE - fill;
-	while(len > free)
+	while(len > (FIFO_SIZE - fill))
 	{
 		producer_waiting = xTaskGetCurrentTaskHandle();
 		xSemaphoreGive(mtx);
