@@ -15,11 +15,11 @@
 #include <stdio.h>
 #include <string.h>
 
-//#define DMA
+#define DMA
 
 #ifdef DMA
 #define DMA_BUFFER_SIZE         256
-#define DMA_QUEUE_SIZE          14
+#define DMA_QUEUE_SIZE          5 // 14
 
 // Circular list of descriptors
 static dma_descriptor_t dma_block_list[DMA_QUEUE_SIZE];
@@ -40,6 +40,8 @@ static size_t curr_dma_pos;
 
 void render_sample_block(short *samples, int no_samples)
 {
+	total_samples += no_samples;
+
 #ifdef DMA
 	while (no_samples > 0) {
 		if (curr_dma_buf) {
@@ -69,7 +71,6 @@ void render_sample_block(short *samples, int no_samples)
 		}
 	}
 #endif
-	total_samples += no_samples;
 }
 
 #ifdef DMA
@@ -99,6 +100,9 @@ static inline void init_descriptors_list()
     // because there's always a buffer that is being used by the DMA subsystem
     // *right now* and we don't want to be able to write to that simultaneously
     dma_queue = xQueueCreate(DMA_QUEUE_SIZE - 1, sizeof(uint8_t*));
+	if (dma_queue == NULL) {
+		printf("Queue creation failed");
+	}
 }
 
 // DMA interrupt handler. It is called each time a DMA block is finished processing.
@@ -178,7 +182,6 @@ static void error(struct mad_stream *stream, struct mad_frame *frame)
  */
 void mp3_task(void *arg)
 {
-	int r;
 	static struct mad_stream stream;
 	static struct mad_frame frame;
 	static struct mad_synth synth;
@@ -200,8 +203,8 @@ void mp3_task(void *arg)
 	while(1) {
 		input(&stream);
 		while(1) {
-			r=mad_frame_decode(&frame, &stream);
-			if (r==-1) {
+			int r = mad_frame_decode(&frame, &stream);
+			if (r == -1) {
 				if (!MAD_RECOVERABLE(stream.error)) {
 					break; // we're most likely out of buffer and need to call input() again
 				}

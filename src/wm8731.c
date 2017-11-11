@@ -36,6 +36,9 @@ int wm8731_init()
 			return ret;
 	}
 
+	if ((ret = wm8731_set_vol(-40)))
+		return ret;
+
 	if ((ret = wm8731_set_sample_rate(48000)))
 		return ret;
 
@@ -43,13 +46,16 @@ int wm8731_init()
 	return wm8731_write_register(0x12, 0x01);
 }
 
-// set volume for headphone output (both channels)
-// init value: 0x79 = 0 dB; 1 dB steps
-// min value: 0x30 = -73 dB; <0x30 = mute
-// max value: 0x7f = +6 dB
-int wm8731_set_vol(uint8_t vol)
+// set volume for headphone output (both channels) in dB
+// init value: 0 dB; min: -73 dB; max: +6 dB
+int wm8731_set_vol(int vol)
 {
-	return wm8731_write_register(0x05, ((vol > 0x7f) ? 0x7f : vol));
+	if (vol < WM8731_MUTE_VOL)
+		vol = WM8731_MUTE_VOL;
+	if (vol > 6)
+		vol = 6;
+	vol += 73 + 0x30; // -73 dB corresponds to 0x30
+	return wm8731_write_register(0x05, (uint8_t) vol);
 }
 
 int wm8731_set_sample_rate(unsigned int sample_rate)
