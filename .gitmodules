@@ -3,4 +3,4 @@
 	url = https://github.com/SuperHouse/esp-open-rtos.git
 [submodule "libmad"]
 	path = libmad
-	url = /home/sven/esp8266/libmad
+	url = https://github.com/svenschwermer/libmad.git
