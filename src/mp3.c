@@ -15,9 +15,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define DMA
-
-#ifdef DMA
 #define DMA_BUFFER_SIZE         256
 #define DMA_QUEUE_SIZE          5 // 14
 
@@ -29,27 +26,27 @@ static uint8_t dma_buffer[DMA_QUEUE_SIZE][DMA_BUFFER_SIZE];
 
 // Queue of empty DMA blocks
 static QueueHandle_t dma_queue;
-#endif
 
 static uint32_t total_samples = 0;
 
-#ifdef DMA
-static uint8_t *curr_dma_buf;
-static size_t curr_dma_pos;
-#endif
-
 void render_sample_block(short *samples, int no_samples)
 {
+	struct frame {
+		short l,r;
+	} __attribute__((packed));
+
+	static uint8_t *curr_dma_buf = NULL;
+	static size_t curr_dma_pos = 0;
+
 	total_samples += no_samples;
 
-#ifdef DMA
 	while (no_samples > 0) {
 		if (curr_dma_buf) {
 			while (curr_dma_pos < DMA_BUFFER_SIZE && no_samples > 0) {
-				uint32_t stereo_sample = *samples;
-				stereo_sample |= stereo_sample<<16;
-				*(uint32_t *)(curr_dma_buf + curr_dma_pos) = stereo_sample;
+				struct frame stereo_sample = { .l = *samples, .r = *samples };
+				*(struct frame *)(curr_dma_buf + curr_dma_pos) = stereo_sample;
 				curr_dma_pos += sizeof stereo_sample;
+				++samples;
 				--no_samples;
 			}
 			// DMA buffer full
@@ -70,10 +67,8 @@ void render_sample_block(short *samples, int no_samples)
 			printf("Cound't get free blocks to push data\n");
 		}
 	}
-#endif
 }
 
-#ifdef DMA
 /**
  * Create a circular list of DMA descriptors
  */
@@ -127,7 +122,6 @@ static void dma_isr_handler(void *args)
 
     portEND_SWITCHING_ISR(task_awoken);
 }
-#endif
 
 uint32_t reset_total_samples()
 {
@@ -138,7 +132,12 @@ uint32_t reset_total_samples()
 
 void set_dac_sample_rate(unsigned int sample_rate)
 {
-//	wm8731_set_sample_rate(sample_rate);
+	static unsigned int last_sample_rate = 0;
+	if (sample_rate != last_sample_rate) {
+		printf("new sample rate: %u kHz\n", sample_rate);
+		last_sample_rate = sample_rate;
+		//wm8731_set_sample_rate(sample_rate);
+	}
 }
 
 /*
@@ -151,12 +150,33 @@ void set_dac_sample_rate(unsigned int sample_rate)
 static void input(struct mad_stream *stream)
 {
 	// Maximum MP3 frame size http://www.mars.org/pipermail/mad-dev/2002-January/000428.html
-	static unsigned char buffer[2106];//[1441];
+	static unsigned char buffer[2108];//[1441];
 
 	size_t rem = stream->bufend - stream->next_frame;
 	memmove(buffer, stream->next_frame, rem);
 
+#if defined(TEST_MP3)
+	extern const unsigned char test_mp3[];
+	extern const unsigned int test_mp3_len;
+	static unsigned int test_mp3_pos = 0;
+
+	unsigned int buf_free = sizeof buffer;
+	while (buf_free > 0) {
+		unsigned int file_remaining = test_mp3_len - test_mp3_pos;
+		if (file_remaining > buf_free) {
+			memcpy(buffer, test_mp3 + test_mp3_pos, buf_free);
+			test_mp3_pos += buf_free;
+			buf_free = 0;
+		} else {
+			memcpy(buffer, test_mp3 + test_mp3_pos, file_remaining);
+			buf_free -= file_remaining;
+			test_mp3_pos = 0;
+		}
+	}
+#else
 	fifo_dequeue(buffer + rem, sizeof(buffer) - rem);
+#endif
+
 	mad_stream_buffer(stream, buffer, sizeof(buffer));
 }
 
@@ -192,13 +212,11 @@ void mp3_task(void *arg)
 	mad_frame_init(&frame);
 	mad_synth_init(&synth);
 
-#ifdef DMA
 	i2s_clock_div_t clock_div = i2s_get_clock_div(48000 * 2 * 16);
 	i2s_pins_t i2s_pins = {.data = true, .clock = true, .ws = true};
 	i2s_dma_init(dma_isr_handler, NULL, clock_div, i2s_pins);
 	init_descriptors_list();
 	i2s_dma_start(dma_block_list);
-#endif
 
 	while(1) {
 		input(&stream);
@@ -208,17 +226,14 @@ void mp3_task(void *arg)
 				if (!MAD_RECOVERABLE(stream.error)) {
 					break; // we're most likely out of buffer and need to call input() again
 				}
-				error(&stream, &frame); 
+				// error(&stream, &frame); FIXME
 				continue;
 			}
 			mad_synth_frame(&synth, &frame);
 		}
 	}
 
-#ifdef DMA
 	i2s_dma_stop();
 	vQueueDelete(dma_queue);
-#endif
-
 	vTaskDelete(NULL);
 }
