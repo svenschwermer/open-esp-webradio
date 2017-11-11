@@ -4,6 +4,6 @@
 #include <stdint.h>
 
 void mp3_task(void *arg);
-uint32_t reset_total_samples(void);
+unsigned int get_and_reset_underrun_counter(void);
 
 #endif /* MP3_H_ */

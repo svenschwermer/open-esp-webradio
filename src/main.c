@@ -36,15 +36,12 @@ void hexdump(const void * buf, size_t len)
 void debug_timer(TimerHandle_t xTimer)
 {
     TickType_t period_ms = xTimerGetPeriod(xTimer) * portTICK_PERIOD_MS;
-    float freq = 1000.f / period_ms;
-    float samplerate = reset_total_samples() * freq;
-    float datarate = reset_total_bytes() * freq;
     printf("stream: %f Bytes/s\n"
-        "decoder: %f samples/s\n"
-        "fifo: %u/%u\n\n",
-        datarate,
-        samplerate,
-        fifo_fill(), fifo_size());
+        "fifo: %u/%u\n"
+        "underruns: %u\n\n",
+        get_and_reset_streamed_bytes() * 1000.f / period_ms,
+        fifo_fill(), fifo_size(),
+        get_and_reset_underrun_counter());
 }
 
 void user_init(void)

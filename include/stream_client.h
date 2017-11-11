@@ -10,6 +10,6 @@ struct stream_params
 };
 
 void stream_task(void *arg);
-uint32_t reset_total_samples(void);
+unsigned int get_and_reset_streamed_bytes(void);
 
 #endif /* STREAM_CLIENT_H_ */

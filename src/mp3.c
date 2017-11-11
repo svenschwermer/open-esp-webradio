@@ -16,7 +16,7 @@
 #include <string.h>
 
 #define DMA_BUFFER_SIZE         256
-#define DMA_QUEUE_SIZE          5 // 14
+#define DMA_QUEUE_SIZE          10
 
 // Circular list of descriptors
 static dma_descriptor_t dma_block_list[DMA_QUEUE_SIZE];
@@ -27,7 +27,7 @@ static uint8_t dma_buffer[DMA_QUEUE_SIZE][DMA_BUFFER_SIZE];
 // Queue of empty DMA blocks
 static QueueHandle_t dma_queue;
 
-static uint32_t total_samples = 0;
+static unsigned int underrun_counter = 0;
 
 void render_sample_block(short *samples, int no_samples)
 {
@@ -37,8 +37,6 @@ void render_sample_block(short *samples, int no_samples)
 
 	static uint8_t *curr_dma_buf = NULL;
 	static size_t curr_dma_pos = 0;
-
-	total_samples += no_samples;
 
 	while (no_samples > 0) {
 		if (curr_dma_buf) {
@@ -110,9 +108,9 @@ static void dma_isr_handler(void *args)
 
         if (xQueueIsQueueFullFromISR(dma_queue)) {
             // List of empty blocks is full. Sender don't send data fast enough.
-            int dummy;
-            //underrun_counter++;
-            // Discard top of the queue
+            ++underrun_counter;
+			// Discard top of the queue
+			int dummy;
             xQueueReceiveFromISR(dma_queue, &dummy, &task_awoken);
         }
         // Push the processed buffer to the queue so sender can refill it.
@@ -123,11 +121,11 @@ static void dma_isr_handler(void *args)
     portEND_SWITCHING_ISR(task_awoken);
 }
 
-uint32_t reset_total_samples()
+unsigned int get_and_reset_underrun_counter()
 {
-	uint32_t samples = total_samples;
-	total_samples = 0;
-	return samples;
+	unsigned int underruns = underrun_counter;
+	underrun_counter = 0;
+	return underruns;
 }
 
 void set_dac_sample_rate(unsigned int sample_rate)
@@ -226,7 +224,7 @@ void mp3_task(void *arg)
 				if (!MAD_RECOVERABLE(stream.error)) {
 					break; // we're most likely out of buffer and need to call input() again
 				}
-				// error(&stream, &frame); FIXME
+				error(&stream, &frame);
 				continue;
 			}
 			mad_synth_frame(&synth, &frame);
