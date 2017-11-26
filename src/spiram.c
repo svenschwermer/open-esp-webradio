@@ -92,21 +92,23 @@ int spiram_test() {
   char a[len];
   char b[len];
   char aa, bb;
-  /*
-    for (int x = 0; x < len; x++) {
-      a[x] = x + 1;
-      b[x] = len - x;
-    }
-    spiram_write(0x0, a, len);
-    spiram_write(0x100, b, len);
 
-    spiram_read(0x0, a, len);
-    spiram_read(0x100, b, len);
-    for (int x = 0; x < len; x++) {
-      if (a[x] != x + 1 || b[x] != len - x)
-        printf("a[%d]=%d b[%d]=%d\n", x, a[x], x, b[x]);
+  for (int x = 0; x < len; x++) {
+    a[x] = x + 1;
+    b[x] = len - x;
+  }
+  spiram_write(0x0, a, len);
+  spiram_write(0x100, b, len);
+
+  spiram_read(0x0, a, len);
+  spiram_read(0x100, b, len);
+  for (int x = 0; x < len; x++) {
+    if (a[x] != x + 1 || b[x] != len - x) {
+      err = 1;
+      printf("a[%d]=%d b[%d]=%d\n", x, a[x], x, b[x]);
     }
-  */
+  }
+
   for (int x = 0; x < len; x++) {
     a[x] = x ^ (x << 2);
     b[x] = 0xaa ^ x;
@@ -128,15 +130,15 @@ int spiram_test() {
       printf("%i) bb: 0x%x != 0x%x\n", x, bb, b[x]);
     }
   }
-  /*
-    char buf[2] = {0x55, 0xaa};
-    spiram_write(0x1, buf, 1);
-    spiram_write(0x2, buf, 2);
-    spiram_read(0x1, buf + 1, 1);
-    if (buf[0] != buf[1]) {
-      err = 1;
-      printf("0x%x != 0x%x\n", buf[0], buf[1]);
-    }
-  */
+
+  char buf[2] = {0x55, 0xaa};
+  spiram_write(0x1, buf, 1);
+  spiram_write(0x2, buf, 2);
+  spiram_read(0x1, buf + 1, 1);
+  if (buf[0] != buf[1]) {
+    err = 1;
+    printf("0x%x != 0x%x\n", buf[0], buf[1]);
+  }
+
   return err;
 }

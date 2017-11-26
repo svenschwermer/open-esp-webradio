@@ -25,12 +25,12 @@ struct spi_regs {
   uint32_t ext3;      // 0xfc
 };
 
-static void apply_settings(struct hspi *hspi);
+static void apply_settings(struct hspi *hspi, uint32_t user_reg);
 static inline int min(int a, int b) { return (a < b) ? a : b; }
 
 int hspi_init(struct hspi *hspi) {
-  volatile struct spi_regs *spi0_regs = (struct spi_regs *)(REG_SPI_BASE(1));
-  volatile struct spi_regs *regs = (struct spi_regs *)(REG_SPI_BASE(1));
+  volatile struct spi_regs *spi_regs = (struct spi_regs *)(REG_SPI_BASE(0));
+  volatile struct spi_regs *hspi_regs = (struct spi_regs *)(REG_SPI_BASE(1));
 
   switch (hspi->mode) {
   case SPI_MODE_SPI:
@@ -59,11 +59,11 @@ int hspi_init(struct hspi *hspi) {
   SET_PERI_REG_MASK(HOST_INF_SEL, PERI_IO_CSPI_OVERLAP);
 
   // set higher priority for spi than hspi
-  spi0_regs->ext3 |= 0x1;
-  regs->ext3 |= 0x3;
+  spi_regs->ext3 |= 0x1;
+  hspi_regs->ext3 |= 0x3;
 
   // 20MHz fixed for now
-  regs->clock =
+  hspi_regs->clock =
       (3 << SPI_CLKCNT_N_S) | (1 << SPI_CLKCNT_H_S) | (3 << SPI_CLKCNT_L_S);
 
   return 0;
@@ -77,7 +77,7 @@ size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
   if (len > 64)
     len = 64;
 
-  uint32_t user_reg = SPI_CS_SETUP | SPI_CS_HOLD | SPI_USR_MISO;
+  uint32_t user_reg = SPI_CS_SETUP | SPI_CS_HOLD | SPI_USR_MISO | SPI_CK_I_EDGE;
   uint32_t user1_reg = ((8 * len) - 1) << SPI_USR_MISO_BITLEN_S;
   if (cmd_bits > 0)
     user_reg |= SPI_USR_COMMAND;
@@ -94,8 +94,7 @@ size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
   while (regs->cmd & SPI_USR)
     ;
 
-  regs->user = user_reg;
-  apply_settings(hspi);
+  apply_settings(hspi, user_reg);
 
   regs->user1 = user1_reg;
   if (cmd_bits > 0)
@@ -141,7 +140,7 @@ size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
   if (cmd_bits > 16)
     cmd_bits = 16;
 
-  uint32_t user_reg = SPI_CS_SETUP | SPI_CS_HOLD;
+  uint32_t user_reg = SPI_CS_SETUP | SPI_CS_HOLD | SPI_CK_I_EDGE;
   if (cmd_bits > 0)
     user_reg |= SPI_USR_COMMAND;
   if (len > 0)
@@ -153,8 +152,7 @@ size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
   while (regs->cmd & SPI_USR)
     ;
 
-  regs->user = user_reg;
-  apply_settings(hspi);
+  apply_settings(hspi, user_reg);
 
   if (addr_bits > 0 || len > 0)
     regs->user1 = (((8 * len) - 1) << SPI_USR_MOSI_BITLEN_S) |
@@ -188,26 +186,25 @@ size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
   return len;
 }
 
-static void apply_settings(struct hspi *hspi) {
+static void apply_settings(struct hspi *hspi, uint32_t user_reg) {
   volatile struct spi_regs *regs = (struct spi_regs *)(REG_SPI_BASE(1));
 
-  static const uint32_t ctrl_mask =
-      SPI_QIO_MODE | SPI_DIO_MODE | SPI_FASTRD_MODE;
+  static const uint32_t ctrl_mask = SPI_QIO_MODE | SPI_DIO_MODE;
   static const uint32_t user_mask = SPI_FWRITE_QIO | SPI_FWRITE_DIO;
   static const uint32_t cs_mask = SPI_CS0_DIS | SPI_CS1_DIS | SPI_CS2_DIS;
 
   switch (hspi->mode) {
   case SPI_MODE_SPI:
     regs->ctrl &= ~ctrl_mask;
-    regs->user &= ~user_mask;
+    regs->user = user_reg & ~user_mask;
     break;
   case SPI_MODE_DIO:
-    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_DIO_MODE | SPI_FASTRD_MODE;
-    regs->user = (regs->user & ~user_mask) | SPI_FWRITE_DIO;
+    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_DIO_MODE;
+    regs->user = (user_reg & ~user_mask) | SPI_FWRITE_DIO;
     break;
   case SPI_MODE_QIO:
-    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_QIO_MODE | SPI_FASTRD_MODE;
-    regs->user = (regs->user & ~user_mask) | SPI_FWRITE_QIO;
+    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_QIO_MODE;
+    regs->user = (user_reg & ~user_mask) | SPI_FWRITE_QIO;
     break;
   }
 
