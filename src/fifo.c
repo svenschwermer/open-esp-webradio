@@ -20,9 +20,19 @@ int fifo_init(void) {
   if (mtx == NULL)
     return 1;
 
-  spiram_init();
+  if (spiram_init())
+    return 1;
+  /*
+    while (1) {
+      uint8_t x[] = {0x01, 0x20, 0x33};
+      spiram_write(0x123456, x, sizeof x);
+      spiram_read(0x123456, x, sizeof x);
+      vTaskDelay(1);
+    }
+  */
 
-  return spiram_test();
+  spiram_test();
+  return 0;
 }
 
 static inline size_t fifo_enqueue_internal(const void *const data,
