@@ -7,7 +7,7 @@ struct spi_regs {
   uint32_t cmd;       // 0x00
   uint32_t addr;      // 0x04
   uint32_t ctrl;      // 0x08
-  uint32_t _1;        // 0x0c
+  uint32_t ctrl1;     // 0x0c
   uint32_t rd_status; // 0x10
   uint32_t ctrl2;     // 0x14
   uint32_t clock;     // 0x18
@@ -21,7 +21,10 @@ struct spi_regs {
   uint32_t slave2;    // 0x38
   uint32_t slave3;    // 0x3c
   uint32_t w[16];     // 0x40..0x7c
-  uint32_t _2[31];    // 0x80..0xf8
+  uint32_t _[28];     // 0x80..0xec
+  uint32_t ext0;      // 0xf0
+  uint32_t ext1;      // 0xf4
+  uint32_t ext2;      // 0xf8
   uint32_t ext3;      // 0xfc
 };
 
