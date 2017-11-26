@@ -14,6 +14,7 @@ enum hspi_mode {
 struct hspi {
   enum hspi_mode mode;
   int cs;
+  unsigned int clock_div;
 };
 
 int hspi_init(struct hspi *hspi) IRAM;
