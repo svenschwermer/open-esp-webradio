@@ -20,7 +20,8 @@ int fifo_init(void) {
   if (mtx == NULL)
     return 1;
 
-  spiram_init();
+  if (spiram_init())
+    return 1;
 
   return spiram_test();
 }

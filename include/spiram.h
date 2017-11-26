@@ -20,7 +20,7 @@
 // SDIO3 - SIO3
 #define SPIRAM_QIO_HACK
 
-void spiram_init() IRAM;
+int spiram_init() IRAM;
 size_t spiram_read(uint32_t addr, void *buf, size_t len) IRAM;
 size_t spiram_write(uint32_t addr, const void *buf, size_t len) IRAM;
 int spiram_test();
