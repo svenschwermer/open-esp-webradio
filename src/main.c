@@ -1,4 +1,5 @@
 #include "fifo.h"
+#include "mi0283qt.h"
 #include "mp3.h"
 #include "stream_client.h"
 #include "wm8731.h"
@@ -55,6 +56,11 @@ void user_init(void) {
 
   if ((ret = wm8731_init())) {
     printf("wm8731_init failed (%d)\n", ret);
+    goto fail;
+  }
+
+  if ((ret = lcd_init())) {
+    printf("lcd_init failed (%d)\n", ret);
     goto fail;
   }
 
