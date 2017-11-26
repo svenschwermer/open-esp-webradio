@@ -16,17 +16,30 @@ int spiram_init() {
   if (hspi_init(&hspi))
     return 1;
 
-  uint8_t mode = 0x40;
-  hspi_write(&hspi, 1, &mode, 0, 0, 8, 0x01); // set mode: sequential mode
+  uint8_t mode = 0x00;
+  for (int try = 1; try <= 2 && mode != 0x40; ++try) {
+    if (try == 2) {
+      // maybe the SPIRAM is in QIO mode, try RSTIO command
+      hspi.mode = SPI_MODE_QIO;
+      uint8_t rstio = 0xff;
+      hspi_write(&hspi, 1, &rstio, 0, 0, 0, 0);
+      hspi.mode = SPI_MODE_SPI;
+    }
 
-  // read back mode register
-  hspi_read(&hspi, 1, &mode, 0, 0, 8, 0x05, 0);
-  printf("spiram: read-back mode = 0x%02x\n", mode);
+    // set mode: sequential mode
+    mode = 0x40;
+    hspi_write(&hspi, 1, &mode, 0, 0, 8, 0x01);
+
+    // read back mode register
+    hspi_read(&hspi, 1, &mode, 0, 0, 8, 0x05, 0);
+    printf("spiram: read-back mode = 0x%02x\n", mode);
+  }
   if (mode != 0x40)
     return 1;
 
 #ifdef SPIRAM_QIO
-  hspi_write(&hspi, 0, NULL, 0, 0, 8, 0x38); // enter quad I/O mode
+  // enter quad I/O mode
+  hspi_write(&hspi, 0, NULL, 0, 0, 8, 0x38);
   hspi.mode = SPI_MODE_QIO;
 #endif
 

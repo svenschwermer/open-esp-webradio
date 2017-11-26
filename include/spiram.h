@@ -11,7 +11,7 @@
 // It's  disabled here because not everyone using the MP3 example will have
 // those pins  connected and the overall speed increase on the MP3 example is
 // negligable.
-//#define SPIRAM_QIO
+#define SPIRAM_QIO
 
 // Define this if you have wired the SRAM:
 // SDIO0 - SIO1
