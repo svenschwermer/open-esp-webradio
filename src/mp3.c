@@ -191,7 +191,7 @@ void mp3_task(void *arg) {
   mad_frame_init(&frame);
   mad_synth_init(&synth, get_sample_buffer);
 
-  i2s_clock_div_t clock_div = i2s_get_clock_div(48000 * 2 * 16);
+  i2s_clock_div_t clock_div = i2s_get_clock_div(44100 * 2 * 16);
   i2s_pins_t i2s_pins = {.data = true, .clock = true, .ws = true};
   i2s_dma_init(dma_isr_handler, NULL, clock_div, i2s_pins);
   init_descriptors_list();
