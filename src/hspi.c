@@ -31,11 +31,12 @@ struct spi_regs {
 static void apply_settings(struct hspi *hspi, uint32_t user_reg);
 static inline int min(int a, int b) { return (a < b) ? a : b; }
 
-int hspi_init(struct hspi *hspi) {
-  volatile struct spi_regs *spi_regs = (struct spi_regs *)(REG_SPI_BASE(0));
-  volatile struct spi_regs *hspi_regs = (struct spi_regs *)(REG_SPI_BASE(1));
+// The following SPI controller instances are located using the linker script.
+extern volatile struct spi_regs SPI;  // aka SPI0, used for the flash mememry
+extern volatile struct spi_regs HSPI; // aka SPI1
 
-  switch (hspi->mode) {
+int hspi_init(struct hspi *settings) {
+  switch (settings->mode) {
   case SPI_MODE_SPI:
   case SPI_MODE_DIO:
   case SPI_MODE_QIO:
@@ -44,7 +45,7 @@ int hspi_init(struct hspi *hspi) {
     return 1;
   }
 
-  switch (hspi->cs) {
+  switch (settings->cs) {
   case 0:
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_CMD_U, FUNC_SPICS0);
     break;
@@ -62,20 +63,18 @@ int hspi_init(struct hspi *hspi) {
   SET_PERI_REG_MASK(HOST_INF_SEL, PERI_IO_CSPI_OVERLAP);
 
   // set higher priority for spi than hspi
-  spi_regs->ext3 |= 0x1;
-  hspi_regs->ext3 |= 0x3;
+  SPI.ext3 |= 0x1;
+  HSPI.ext3 |= 0x3;
 
   // 20MHz fixed for now
-  hspi_regs->clock =
+  HSPI.clock =
       (3 << SPI_CLKCNT_N_S) | (1 << SPI_CLKCNT_H_S) | (3 << SPI_CLKCNT_L_S);
 
   return 0;
 }
 
-size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
+size_t hspi_read(struct hspi *settings, size_t len, void *data, int addr_bits,
                  uint32_t addr, int cmd_bits, uint16_t cmd, int dummy_cycles) {
-  volatile struct spi_regs *regs = (struct spi_regs *)(REG_SPI_BASE(1));
-
   // we can read a maximum of 16*4=64 bytes at a time
   if (len > 64)
     len = 64;
@@ -94,26 +93,26 @@ size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
   }
 
   // make sure the last operation is done
-  while (regs->cmd & SPI_USR)
+  while (HSPI.cmd & SPI_USR)
     ;
 
-  apply_settings(hspi, user_reg);
+  apply_settings(settings, user_reg);
 
-  regs->user1 = user1_reg;
+  HSPI.user1 = user1_reg;
   if (cmd_bits > 0)
-    regs->user2 = ((min(cmd_bits, 16) - 1) << SPI_USR_COMMAND_BITLEN_S) | cmd;
+    HSPI.user2 = ((min(cmd_bits, 16) - 1) << SPI_USR_COMMAND_BITLEN_S) | cmd;
   if (addr_bits > 0)
-    regs->addr = addr << (32 - addr_bits);
+    HSPI.addr = addr << (32 - addr_bits);
 
   // start data transfer and wait until completion
-  regs->cmd |= SPI_USR;
-  while (regs->cmd & SPI_USR)
+  HSPI.cmd |= SPI_USR;
+  while (HSPI.cmd & SPI_USR)
     ;
 
   if (((uintptr_t)data) & 0x3 || len % 4 != 0) {
     uint8_t *byte_buf = data;
     for (size_t i = 0; i < len;) {
-      uint32_t d = regs->w[i / 4];
+      uint32_t d = HSPI.w[i / 4];
       byte_buf[i++] = d & 0xff;
       if (i < len)
         byte_buf[i++] = (d >> 8) & 0xff;
@@ -125,16 +124,14 @@ size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
   } else {
     uint32_t *word_buf = data;
     for (size_t i = 0; i < len / 4; ++i)
-      word_buf[i] = regs->w[i];
+      word_buf[i] = HSPI.w[i];
   }
 
   return len;
 }
 
-size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
+size_t hspi_write(struct hspi *settings, size_t len, const void *data,
                   int addr_bits, uint32_t addr, int cmd_bits, uint16_t cmd) {
-  volatile struct spi_regs *regs = (struct spi_regs *)(REG_SPI_BASE(1));
-
   // we can write a maximum of 16*4=64 bytes at a time
   if (len > 64)
     len = 64;
@@ -152,18 +149,18 @@ size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
     user_reg |= SPI_USR_ADDR;
 
   // make sure the last operation is done
-  while (regs->cmd & SPI_USR)
+  while (HSPI.cmd & SPI_USR)
     ;
 
-  apply_settings(hspi, user_reg);
+  apply_settings(settings, user_reg);
 
   if (addr_bits > 0 || len > 0)
-    regs->user1 = (((8 * len) - 1) << SPI_USR_MOSI_BITLEN_S) |
-                  ((addr_bits - 1) << SPI_USR_ADDR_BITLEN_S);
+    HSPI.user1 = (((8 * len) - 1) << SPI_USR_MOSI_BITLEN_S) |
+                 ((addr_bits - 1) << SPI_USR_ADDR_BITLEN_S);
   if (cmd_bits > 0)
-    regs->user2 = ((cmd_bits - 1) << SPI_USR_COMMAND_BITLEN_S) | cmd;
+    HSPI.user2 = ((cmd_bits - 1) << SPI_USR_COMMAND_BITLEN_S) | cmd;
   if (addr_bits > 0)
-    regs->addr = addr << (32 - addr_bits);
+    HSPI.addr = addr << (32 - addr_bits);
 
   if (((uintptr_t)data) & 0x3 || len % 4 != 0) {
     const uint8_t *byte_buf = data;
@@ -175,51 +172,49 @@ size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
         d |= ((uint32_t)byte_buf[i++]) << 16;
       if (i < len)
         d |= ((uint32_t)byte_buf[i++]) << 24;
-      regs->w[(i - 1) / 4] = d;
+      HSPI.w[(i - 1) / 4] = d;
     }
   } else {
     const uint32_t *word_buf = data;
     for (size_t i = 0; i < len / 4; ++i)
-      regs->w[i] = word_buf[i];
+      HSPI.w[i] = word_buf[i];
   }
 
   // start data transfer
-  regs->cmd |= SPI_USR;
+  HSPI.cmd |= SPI_USR;
 
   return len;
 }
 
-static void apply_settings(struct hspi *hspi, uint32_t user_reg) {
-  volatile struct spi_regs *regs = (struct spi_regs *)(REG_SPI_BASE(1));
-
+static void apply_settings(struct hspi *settings, uint32_t user_reg) {
   static const uint32_t ctrl_mask = SPI_QIO_MODE | SPI_DIO_MODE;
   static const uint32_t user_mask = SPI_FWRITE_QIO | SPI_FWRITE_DIO;
   static const uint32_t cs_mask = SPI_CS0_DIS | SPI_CS1_DIS | SPI_CS2_DIS;
 
-  switch (hspi->mode) {
+  switch (settings->mode) {
   case SPI_MODE_SPI:
-    regs->ctrl &= ~ctrl_mask;
-    regs->user = user_reg & ~user_mask;
+    HSPI.ctrl &= ~ctrl_mask;
+    HSPI.user = user_reg & ~user_mask;
     break;
   case SPI_MODE_DIO:
-    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_DIO_MODE;
-    regs->user = (user_reg & ~user_mask) | SPI_FWRITE_DIO;
+    HSPI.ctrl = (HSPI.ctrl & ~ctrl_mask) | SPI_DIO_MODE;
+    HSPI.user = (user_reg & ~user_mask) | SPI_FWRITE_DIO;
     break;
   case SPI_MODE_QIO:
-    regs->ctrl = (regs->ctrl & ~ctrl_mask) | SPI_QIO_MODE;
-    regs->user = (user_reg & ~user_mask) | SPI_FWRITE_QIO;
+    HSPI.ctrl = (HSPI.ctrl & ~ctrl_mask) | SPI_QIO_MODE;
+    HSPI.user = (user_reg & ~user_mask) | SPI_FWRITE_QIO;
     break;
   }
 
-  switch (hspi->cs) {
+  switch (settings->cs) {
   case 0:
-    regs->pin = (regs->pin & ~cs_mask) | SPI_CS1_DIS | SPI_CS2_DIS;
+    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS1_DIS | SPI_CS2_DIS;
     break;
   case 1:
-    regs->pin = (regs->pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS2_DIS;
+    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS2_DIS;
     break;
   case 2:
-    regs->pin = (regs->pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS1_DIS;
+    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS1_DIS;
     break;
   }
 }
