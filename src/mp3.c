@@ -129,9 +129,9 @@ void set_dac_sample_rate(unsigned int sample_rate) {
  * time, we are finished decoding.
  */
 static void input(struct mad_stream *stream) {
-  // Maximum MP3 frame size
+  // Maximum MP3 frame size + MAD_BUFFER_GUARD
   // http://www.mars.org/pipermail/mad-dev/2002-January/000428.html
-  static unsigned char buffer[2108]; //[1441];
+  static unsigned char buffer[1441 + 8];
 
   size_t rem = stream->bufend - stream->next_frame;
   memmove(buffer, stream->next_frame, rem);
