@@ -59,7 +59,7 @@ int hspi_init(struct hspi *settings) {
     return 1;
   }
 
-  if (hspi->clock_div < 1 || hspi->clock_div > 64)
+  if (settings->clock_div < 1 || settings->clock_div > 64)
     return 1;
 
   // hspi overlap to spi, two spi masters on cspi
@@ -68,10 +68,6 @@ int hspi_init(struct hspi *settings) {
   // set higher priority for spi than hspi
   SPI.ext3 |= 0x1;
   HSPI.ext3 |= 0x3;
-
-  // 20MHz fixed for now
-  HSPI.clock =
-      (3 << SPI_CLKCNT_N_S) | (1 << SPI_CLKCNT_H_S) | (3 << SPI_CLKCNT_L_S);
 
   return 0;
 }
@@ -221,8 +217,8 @@ static void apply_settings(struct hspi *settings, uint32_t user_reg) {
     break;
   }
 
-  const uint32_t clkcnt_n = hspi->clock_div - 1;
-  const uint32_t clkcnt_h = hspi->clock_div / 2 - 1;
-  regs->clock = (clkcnt_n << SPI_CLKCNT_N_S) | (clkcnt_h << SPI_CLKCNT_H_S) |
-                (clkcnt_n << SPI_CLKCNT_L_S);
+  const uint32_t clkcnt_n = settings->clock_div - 1;
+  const uint32_t clkcnt_h = settings->clock_div / 2 - 1;
+  HSPI.clock = (clkcnt_n << SPI_CLKCNT_N_S) | (clkcnt_h << SPI_CLKCNT_H_S) |
+               (clkcnt_n << SPI_CLKCNT_L_S);
 }
