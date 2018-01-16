@@ -17,8 +17,8 @@
 
 #include <stdio.h>
 
-static struct stream_params stream_params = {.host = "icecast.omroep.nl",
-                                             .path = "/3fm-sb-mp3"};
+static struct stream_params stream_params = {.host = "r.ezbt.me",
+                                             .path = "/antenne"};
 static TaskHandle_t mp3_task_hndl, stream_task_hndl;
 
 void hexdump(const void *buf, size_t len) {
@@ -73,7 +73,7 @@ void user_init(void) {
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
 
-  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 2, &mp3_task_hndl) !=
+  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 3, &mp3_task_hndl) !=
       pdPASS) {
     printf("Failed to create mp3 task!\n");
     goto fail;
