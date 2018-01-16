@@ -67,7 +67,7 @@ void user_init(void) {
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
 
-  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 2, &mp3_task_hndl) !=
+  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 3, &mp3_task_hndl) !=
       pdPASS) {
     printf("Failed to create mp3 task!\n");
     goto fail;
