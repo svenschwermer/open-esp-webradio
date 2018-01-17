@@ -1,6 +1,7 @@
 #ifndef _MI0283QT_H_
 #define _MI0283QT_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 // values 0..63
@@ -13,6 +14,7 @@ static inline uint16_t RGB(uint16_t r, uint16_t g, uint16_t b) {
 
 int lcd_init(void);
 void lcd_set_area(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
+void lcd_write_pixels(size_t count, const uint16_t *pixels);
 void lcd_fill(uint16_t color);
 
 #endif

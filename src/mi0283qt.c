@@ -117,6 +117,15 @@ void lcd_set_area(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
   wr_cmd(0x08, (uint8_t)(y1 >> 8));   // set y1
 }
 
+void lcd_write_pixels(size_t count, const uint16_t *pixels) {
+  const uint8_t cmd = 0x22; // SRAM Write Control
+  hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
+
+  size_t rem_bytes = count * sizeof(pixels[0]);
+  while (rem_bytes > 0)
+    rem_bytes -= hspi_write(&hspi, rem_bytes, pixels, 0, 0, 8, LCD_DATA);
+}
+
 void lcd_fill(uint16_t color) {
   lcd_set_area(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
 
@@ -126,7 +135,7 @@ void lcd_fill(uint16_t color) {
   const uint8_t cmd = 0x22; // SRAM Write Control
   hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
 
-  size_t rem_bytes = LCD_WIDTH * LCD_HEIGHT * 2;
+  size_t rem_bytes = LCD_WIDTH * LCD_HEIGHT * sizeof(pixel_buffer[0]);
   while (rem_bytes > 0)
     rem_bytes -= hspi_write(&hspi, rem_bytes, pixel_buffer, 0, 0, 8, LCD_DATA);
 }
