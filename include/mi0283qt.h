@@ -1,6 +1,7 @@
 #ifndef _MI0283QT_H_
 #define _MI0283QT_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -16,5 +17,7 @@ int lcd_init(void);
 void lcd_set_area(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1);
 void lcd_write_pixels(size_t count, const uint16_t *pixels);
 void lcd_fill(uint16_t color);
+void lcd_xy_exchange(bool exchange);
+void lcd_string(int x, int y, const char *str);
 
 #endif

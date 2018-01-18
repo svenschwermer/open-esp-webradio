@@ -1,7 +1,7 @@
 #include "mi0283qt.h"
-#include "hspi.h"
-
 #include "FreeRTOS.h"
+#include "hspi.h"
+#include "lcd_font.h"
 #include "task.h"
 
 #define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
@@ -64,8 +64,8 @@ static const struct init_step init_steps[] = {
     {STEP_TYPE_CMD, .cmd = {0x17, 0x05}},
     // panel characteristic
     {STEP_TYPE_CMD, .cmd = {0x36, 0x00}},
-    // display options
-    {STEP_TYPE_CMD, .cmd = {0x16, 0xA8}}, // Memory Access control
+    // Memory Access control
+    {STEP_TYPE_CMD, .cmd = {0x16, 0xA8}}, // MY=1 MX=0 MV=1 ML=0 BGR=1
     // display on
     {STEP_TYPE_CMD, .cmd = {0x28, 0x38}},
     {STEP_TYPE_DELAY, .delay_ms = 50},
@@ -75,6 +75,17 @@ static const struct init_step init_steps[] = {
 static inline void wr_cmd(uint8_t cmd, uint8_t data) {
   hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
   hspi_write(&hspi, 1, &data, 0, 0, 8, LCD_DATA);
+}
+
+static inline void wr_sram(void) {
+  const uint8_t cmd = 0x22; // SRAM Write Control
+  hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
+}
+
+static inline void wr_pixels(size_t count, const uint16_t *pixels) {
+  size_t rem_bytes = count * sizeof(pixels[0]);
+  while (rem_bytes > 0)
+    rem_bytes -= hspi_write(&hspi, rem_bytes, pixels, 0, 0, 8, LCD_DATA);
 }
 
 int lcd_init() {
@@ -106,6 +117,8 @@ int lcd_init() {
   return 0;
 }
 
+// sets the drawing area to [x0,x1] x [y0,y1]
+// note that x1 and y1 are included
 void lcd_set_area(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
   wr_cmd(0x03, (uint8_t)(x0 & 0xff)); // set x0
   wr_cmd(0x02, (uint8_t)(x0 >> 8));   // set x0
@@ -118,12 +131,8 @@ void lcd_set_area(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
 }
 
 void lcd_write_pixels(size_t count, const uint16_t *pixels) {
-  const uint8_t cmd = 0x22; // SRAM Write Control
-  hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
-
-  size_t rem_bytes = count * sizeof(pixels[0]);
-  while (rem_bytes > 0)
-    rem_bytes -= hspi_write(&hspi, rem_bytes, pixels, 0, 0, 8, LCD_DATA);
+  wr_sram();
+  wr_pixels(count, pixels);
 }
 
 void lcd_fill(uint16_t color) {
@@ -132,10 +141,53 @@ void lcd_fill(uint16_t color) {
   for (int i = 0; i < ARRAY_SIZE(pixel_buffer); ++i)
     pixel_buffer[i] = color;
 
-  const uint8_t cmd = 0x22; // SRAM Write Control
-  hspi_write(&hspi, 1, &cmd, 0, 0, 8, LCD_REGISTER);
+  wr_sram();
 
   size_t rem_bytes = LCD_WIDTH * LCD_HEIGHT * sizeof(pixel_buffer[0]);
   while (rem_bytes > 0)
     rem_bytes -= hspi_write(&hspi, rem_bytes, pixel_buffer, 0, 0, 8, LCD_DATA);
+}
+
+void lcd_xy_exchange(bool exchange) {
+  // Memory Access control
+  if (exchange)
+    wr_cmd(0x16, 0xA8); // default: MV=1
+  else
+    wr_cmd(0x16, 0x88);
+}
+
+void lcd_string(int x, int y, const char *str) {
+  lcd_xy_exchange(false);
+  for (int i = 0; *str != '\0'; ++i, ++str) {
+    int x_start = x + i * (FONT_WIDTH + FONT_MARGIN);
+    // x & y need to be flipped, because we disable xy exchange
+    lcd_set_area(y, x_start, y + FONT_HEIGHT - 1,
+                 x_start + FONT_WIDTH + FONT_MARGIN - 1);
+    wr_sram();
+
+    int buf_pos = 0;
+    for (int col = 0; col < FONT_WIDTH; ++col) {
+      uint8_t col_byte = font[(*str - FIRST_CHAR) * FONT_WIDTH + col];
+      for (int line = 0; line < FONT_HEIGHT; ++line) {
+        if (col_byte & (1 << line))
+          pixel_buffer[buf_pos] = RGB(63, 63, 63);
+        else
+          pixel_buffer[buf_pos] = RGB(0, 0, 0);
+        ++buf_pos;
+      }
+
+      if (buf_pos + FONT_HEIGHT > ARRAY_SIZE(pixel_buffer)) {
+        wr_pixels(buf_pos, pixel_buffer);
+        buf_pos = 0;
+      }
+    }
+
+    // draw horizontal margin
+    for (int line = FONT_HEIGHT - 1; line >= 0; --line)
+      pixel_buffer[buf_pos++] = RGB(0, 0, 0);
+
+    // write remaining pixel data
+    wr_pixels(buf_pos, pixel_buffer);
+  }
+  lcd_xy_exchange(true);
 }
