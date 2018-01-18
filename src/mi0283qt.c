@@ -3,15 +3,13 @@
 #include "hspi.h"
 #include "lcd_font.h"
 #include "task.h"
+#include <string.h>
 
 #define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
 
 #define LCD_ID 0
 #define LCD_DATA ((0x72) | (LCD_ID << 2))
 #define LCD_REGISTER ((0x70) | (LCD_ID << 2))
-
-#define LCD_WIDTH 320
-#define LCD_HEIGHT 240
 
 static struct hspi hspi;
 static uint16_t pixel_buffer[32];
@@ -65,7 +63,7 @@ static const struct init_step init_steps[] = {
     // panel characteristic
     {STEP_TYPE_CMD, .cmd = {0x36, 0x00}},
     // Memory Access control
-    {STEP_TYPE_CMD, .cmd = {0x16, 0xA8}}, // MY=1 MX=0 MV=1 ML=0 BGR=1
+    {STEP_TYPE_CMD, .cmd = {0x16, 0x08}}, // MY=0 MX=0 MV=0 ML=0 BGR=1
     // display on
     {STEP_TYPE_CMD, .cmd = {0x28, 0x38}},
     {STEP_TYPE_DELAY, .delay_ms = 50},
@@ -135,31 +133,41 @@ void lcd_write_pixels(size_t count, const uint16_t *pixels) {
   wr_pixels(count, pixels);
 }
 
-void lcd_fill(uint16_t color) {
-  lcd_set_area(0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
+void lcd_rect(uint16_t color, uint16_t x0, uint16_t y0, uint16_t x1,
+              uint16_t y1) {
+  lcd_set_area(x0, y0, x1, y1);
 
   for (int i = 0; i < ARRAY_SIZE(pixel_buffer); ++i)
     pixel_buffer[i] = color;
 
   wr_sram();
 
-  size_t rem_bytes = LCD_WIDTH * LCD_HEIGHT * sizeof(pixel_buffer[0]);
+  size_t rem_bytes = (x1 - x0 + 1) * (y1 - y0 + 1) * sizeof(pixel_buffer[0]);
   while (rem_bytes > 0)
     rem_bytes -= hspi_write(&hspi, rem_bytes, pixel_buffer, 0, 0, 8, LCD_DATA);
+}
+
+void lcd_fill(uint16_t color) {
+  lcd_rect(color, 0, 0, LCD_WIDTH - 1, LCD_HEIGHT - 1);
 }
 
 void lcd_xy_exchange(bool exchange) {
   // Memory Access control
   if (exchange)
-    wr_cmd(0x16, 0xA8); // default: MV=1
+    wr_cmd(0x16, 0x28);
   else
-    wr_cmd(0x16, 0x88);
+    wr_cmd(0x16, 0x08); // default: MV=0
 }
 
-void lcd_string(int x, int y, const char *str) {
-  lcd_xy_exchange(false);
-  for (int i = 0; *str != '\0'; ++i, ++str) {
-    int x_start = x + i * (FONT_WIDTH + FONT_MARGIN);
+int lcd_string(int x, int y, const char *str) {
+  return lcd_stringn(x, y, str, strlen(str));
+}
+
+int lcd_stringn(int x, int y, const char *str, size_t n) {
+  int x_start = 0;
+  lcd_xy_exchange(true);
+  for (size_t i = 0; i < n; ++i, ++str) {
+    x_start = x + i * (FONT_WIDTH + FONT_MARGIN);
     // x & y need to be flipped, because we disable xy exchange
     lcd_set_area(y, x_start, y + FONT_HEIGHT - 1,
                  x_start + FONT_WIDTH + FONT_MARGIN - 1);
@@ -167,7 +175,9 @@ void lcd_string(int x, int y, const char *str) {
 
     int buf_pos = 0;
     for (int col = 0; col < FONT_WIDTH; ++col) {
-      uint8_t col_byte = font[(*str - FIRST_CHAR) * FONT_WIDTH + col];
+      uint8_t col_byte = 0xff;
+      if (*str >= FIRST_CHAR && *str < FIRST_CHAR + CHAR_COUNT)
+        col_byte = font[(*str - FIRST_CHAR) * FONT_WIDTH + col];
       for (int line = 0; line < FONT_HEIGHT; ++line) {
         if (col_byte & (1 << line))
           pixel_buffer[buf_pos] = RGB(63, 63, 63);
@@ -189,5 +199,29 @@ void lcd_string(int x, int y, const char *str) {
     // write remaining pixel data
     wr_pixels(buf_pos, pixel_buffer);
   }
-  lcd_xy_exchange(true);
+  lcd_xy_exchange(false);
+  return x_start + (FONT_WIDTH + FONT_MARGIN);
+}
+
+void lcd_scroll_on(uint16_t top_fixed, uint16_t bottom_fixed) {
+  // Vertical scroll top fixed area register
+  wr_cmd(0x0e, top_fixed >> 8);
+  wr_cmd(0x0f, top_fixed & 0xff);
+
+  // Vertical scroll height area register
+  uint16_t scroll_height = LCD_HEIGHT - top_fixed - bottom_fixed;
+  wr_cmd(0x10, scroll_height >> 8);
+  wr_cmd(0x11, scroll_height & 0xff);
+
+  // Vertical scroll button fixed area register
+  wr_cmd(0x12, bottom_fixed >> 8);
+  wr_cmd(0x13, bottom_fixed & 0xff);
+
+  wr_cmd(0x01, 0x08); // SCROLL=1
+}
+
+void lcd_scroll(uint16_t lines) {
+  // Vertical scroll start address register
+  wr_cmd(0x14, lines >> 8);
+  wr_cmd(0x15, lines & 0xff);
 }
