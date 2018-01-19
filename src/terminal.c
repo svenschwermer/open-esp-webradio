@@ -42,10 +42,10 @@ static ssize_t term_stdout(struct _reent *r, int fd, const void *ptr,
         ++j;
     }
 
-    x = lcd_stringn(x, y, str + i, j);
-    if (x < LCD_WIDTH) {
+    if (j > 0)
+      x = lcd_stringn(x, y, str + i, j);
+    if (x < LCD_WIDTH)
       lcd_rect(RGB(0, 0, 0), x, y, LCD_WIDTH - 1, y + LINE_HEIGHT - 1);
-    }
 
     if (line_feed) {
       x = 0;

@@ -164,13 +164,10 @@ int lcd_string(int x, int y, const char *str) {
 }
 
 int lcd_stringn(int x, int y, const char *str, size_t n) {
-  int x_start = 0;
   lcd_xy_exchange(true);
   for (size_t i = 0; i < n; ++i, ++str) {
-    x_start = x + i * (FONT_WIDTH + FONT_MARGIN);
     // x & y need to be flipped, because we disable xy exchange
-    lcd_set_area(y, x_start, y + FONT_HEIGHT - 1,
-                 x_start + FONT_WIDTH + FONT_MARGIN - 1);
+    lcd_set_area(y, x, y + FONT_HEIGHT - 1, x + FONT_WIDTH + FONT_MARGIN - 1);
     wr_sram();
 
     int buf_pos = 0;
@@ -198,9 +195,11 @@ int lcd_stringn(int x, int y, const char *str, size_t n) {
 
     // write remaining pixel data
     wr_pixels(buf_pos, pixel_buffer);
+
+    x += (FONT_WIDTH + FONT_MARGIN);
   }
   lcd_xy_exchange(false);
-  return x_start + (FONT_WIDTH + FONT_MARGIN);
+  return x;
 }
 
 void lcd_scroll_on(uint16_t top_fixed, uint16_t bottom_fixed) {
