@@ -25,27 +25,14 @@ static TaskHandle_t mp3_task_hndl, stream_task_hndl;
 
 void ui_task(void *p) {
   for (int i = 0;; ++i) {
-    // printf("Interation #%d\n", i);
-    vTaskDelay(50);
+    printf("free heap: %u\nfifo: %u/%u\nunderruns: %u\n\n",
+           xPortGetFreeHeapSize(), fifo_fill(), fifo_size(),
+           get_and_reset_underrun_counter());
+    vTaskDelay(2000 / portTICK_PERIOD_MS);
   }
 
   vTaskDelete(NULL);
 }
-
-#if 0
-void debug_timer(TimerHandle_t xTimer) {
-  TickType_t period_ms = xTimerGetPeriod(xTimer) * portTICK_PERIOD_MS;
-  printf("high water (words): mp3=%lu stream=%lu\n"
-         "free heap: %u\n"
-         "stream: %f bytes/s\n"
-         "fifo: %u/%u\n"
-         "underruns: %u\n\n",
-         uxTaskGetStackHighWaterMark(mp3_task_hndl),
-         uxTaskGetStackHighWaterMark(stream_task_hndl), xPortGetFreeHeapSize(),
-         get_and_reset_streamed_bytes() * 1000.f / period_ms, fifo_fill(),
-         fifo_size(), get_and_reset_underrun_counter());
-}
-#endif
 
 void user_init(void) {
   int ret;
