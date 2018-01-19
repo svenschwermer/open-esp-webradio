@@ -13,6 +13,7 @@ int spiram_init() {
 
   hspi.cs = 2;
   hspi.mode = SPI_MODE_SPI;
+  hspi.clock_div = 4; // 20 MHz
   if (hspi_init(&hspi))
     return 1;
 
