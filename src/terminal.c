@@ -9,17 +9,17 @@
 #include <stdio.h>
 #include <stdout_redirect.h>
 
-#define CHARS_PER_LINE (LCD_WIDTH / (FONT_WIDTH + FONT_MARGIN))
+#define COL_WIDTH (FONT_WIDTH + FONT_MARGIN)
+#define LINE_HEIGHT (FONT_HEIGHT + FONT_MARGIN)
 
-static uint16_t y;
-static SemaphoreHandle_t mtx;
+static uint16_t x, y;
 
 static ssize_t term_stdout(struct _reent *r, int fd, const void *ptr,
                            size_t len);
 
 void term_init(void) {
+  x = 0;
   y = 0;
-  mtx = xSemaphoreCreateMutex();
 
   lcd_fill(RGB(0, 0, 0));
   lcd_scroll_on(0, 0);
@@ -30,31 +30,34 @@ void term_init(void) {
 static ssize_t term_stdout(struct _reent *r, int fd, const void *ptr,
                            size_t len) {
   const char *str = (const char *)ptr;
+
   size_t i = 0;
-
-  xSemaphoreTake(mtx, portMAX_DELAY);
-
   while (i < len) {
-    size_t j;
-    for (j = 0; (i + j) < len && j < CHARS_PER_LINE; ++j) {
-      if (str[i + j] == '\n')
-        break;
-    }
-    int x = lcd_stringn(0, y, str + i, j);
-    if (x < LCD_WIDTH) {
-      lcd_rect(RGB(0, 0, 0), x, y, LCD_WIDTH - 1,
-               y + FONT_HEIGHT + FONT_MARGIN - 1);
+    bool line_feed = false;
+    size_t j = 0;
+    while (i + j < len && !line_feed) {
+      if (x + j * COL_WIDTH >= LCD_WIDTH || str[i + j] == '\n')
+        line_feed = true;
+      else
+        ++j;
     }
 
-    y = (y + FONT_HEIGHT + FONT_MARGIN) % LCD_HEIGHT;
-    lcd_scroll(y);
+    x = lcd_stringn(x, y, str + i, j);
+    if (x < LCD_WIDTH) {
+      lcd_rect(RGB(0, 0, 0), x, y, LCD_WIDTH - 1, y + LINE_HEIGHT - 1);
+    }
+
+    if (line_feed) {
+      x = 0;
+      y = (y + LINE_HEIGHT) % LCD_HEIGHT;
+      lcd_scroll(y);
+    }
+
     i += j;
 
     if (str[i] == '\n')
       ++i;
   }
-
-  xSemaphoreGive(mtx);
 
   return i;
 }
