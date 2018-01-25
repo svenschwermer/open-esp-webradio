@@ -90,7 +90,7 @@ int lcd_init() {
   hspi.mode = SPI_MODE_SPI;
   hspi.cs = 1;
   hspi.clock_div = 2; // 40 MHz
-  if (hspi_init(&hspi))
+  if (hspi_init_inst(&hspi))
     return 1;
 
   TickType_t ticks;

@@ -3,18 +3,13 @@
 #include "espressif/esp_common.h"
 #include "hspi.h"
 
-#include "FreeRTOS.h"
-#include "task.h"
-
 static struct hspi hspi;
 
 int spiram_init() {
-  taskENTER_CRITICAL();
-
   hspi.cs = 2;
   hspi.mode = SPI_MODE_SPI;
   hspi.clock_div = 4; // 20 MHz
-  if (hspi_init(&hspi))
+  if (hspi_init_inst(&hspi))
     return 1;
 
   uint8_t mode = 0x00;
@@ -44,8 +39,6 @@ int spiram_init() {
   hspi.mode = SPI_MODE_QIO;
 #endif
 
-  taskEXIT_CRITICAL();
-
   uint8_t dummy[64];
   spiram_read(0x000000, dummy, sizeof dummy);
 
@@ -54,8 +47,6 @@ int spiram_init() {
 
 size_t spiram_read(uint32_t addr, void *buf, size_t len) {
   size_t read;
-
-  taskENTER_CRITICAL();
 
 #ifdef SPIRAM_QIO
   addr |= 0x03000000; // prepend command
@@ -70,15 +61,11 @@ size_t spiram_read(uint32_t addr, void *buf, size_t len) {
   read = hspi_read(&hspi, len, buf, 24, addr, 8, 0x03, 0);
 #endif
 
-  taskEXIT_CRITICAL();
-
   return read;
 }
 
 size_t spiram_write(uint32_t addr, const void *buf, size_t len) {
   size_t written;
-
-  taskENTER_CRITICAL();
 
 #ifdef SPIRAM_QIO
   addr |= 0x02000000; // prepend command
@@ -92,8 +79,6 @@ size_t spiram_write(uint32_t addr, const void *buf, size_t len) {
 #else
   written = hspi_write(&hspi, len, buf, 24, addr, 8, 0x02);
 #endif
-
-  taskEXIT_CRITICAL();
 
   return written;
 }

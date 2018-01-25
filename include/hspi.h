@@ -2,6 +2,7 @@
 #define _HSPI_H_
 
 #include "common_macros.h" // for IRAM
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,12 +18,14 @@ struct hspi {
   unsigned int clock_div;
 };
 
-int hspi_init(struct hspi *hspi) IRAM;
+void hspi_init(void);
+int hspi_init_inst(struct hspi *hspi);
 size_t hspi_read(struct hspi *hspi, size_t len, void *data, int addr_bits,
                  uint32_t addr, int cmd_bits, uint16_t cmd,
                  int dummy_cycles) IRAM;
 size_t hspi_write(struct hspi *hspi, size_t len, const void *data,
                   int addr_bits, uint32_t addr, int cmd_bits,
                   uint16_t cmd) IRAM;
+uint32_t ads_read(int channel, bool single_ended) IRAM;
 
 #endif

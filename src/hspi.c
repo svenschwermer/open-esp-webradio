@@ -1,7 +1,9 @@
 #include "hspi.h"
+#include "FreeRTOS.h"
 #include "common_macros.h"
 #include "espressif/esp8266/esp8266.h"
 #include "espressif/esp_common.h"
+#include "semphr.h"
 
 struct spi_regs {
   uint32_t cmd;       // 0x00
@@ -32,10 +34,24 @@ static void apply_settings(struct hspi *hspi, uint32_t user_reg);
 static inline int min(int a, int b) { return (a < b) ? a : b; }
 
 // The following SPI controller instances are located using the linker script.
-extern volatile struct spi_regs SPI;  // aka SPI0, used for the flash mememry
+extern volatile struct spi_regs SPI;  // aka SPI0, used for the flash memory
 extern volatile struct spi_regs HSPI; // aka SPI1
 
-int hspi_init(struct hspi *settings) {
+static SemaphoreHandle_t mtx;
+
+void hspi_init(void) {
+  mtx = xSemaphoreCreateMutex();
+
+  // hspi overlap to spi, two spi masters on cspi
+  SET_PERI_REG_MASK(HOST_INF_SEL, PERI_IO_CSPI_OVERLAP);
+
+  // TODO: What does this actually do?
+  // set higher priority for spi than hspi
+  SPI.ext3 |= 0x1;
+  HSPI.ext3 |= 0x3;
+}
+
+int hspi_init_inst(struct hspi *settings) {
   switch (settings->mode) {
   case SPI_MODE_SPI:
   case SPI_MODE_DIO:
@@ -46,6 +62,8 @@ int hspi_init(struct hspi *settings) {
   }
 
   switch (settings->cs) {
+  case -1:
+    break;
   case 0:
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_CMD_U, FUNC_SPICS0);
     break;
@@ -61,13 +79,6 @@ int hspi_init(struct hspi *settings) {
 
   if (settings->clock_div < 1 || settings->clock_div > 64)
     return 1;
-
-  // hspi overlap to spi, two spi masters on cspi
-  SET_PERI_REG_MASK(HOST_INF_SEL, PERI_IO_CSPI_OVERLAP);
-
-  // set higher priority for spi than hspi
-  SPI.ext3 |= 0x1;
-  HSPI.ext3 |= 0x3;
 
   return 0;
 }
@@ -90,6 +101,8 @@ size_t hspi_read(struct hspi *settings, size_t len, void *data, int addr_bits,
     user_reg |= SPI_USR_DUMMY;
     user1_reg |= (min(dummy_cycles, 256) - 1) << SPI_USR_DUMMY_CYCLELEN_S;
   }
+
+  xSemaphoreTake(mtx, portMAX_DELAY);
 
   // make sure the last operation is done
   while (HSPI.cmd & SPI_USR)
@@ -126,6 +139,8 @@ size_t hspi_read(struct hspi *settings, size_t len, void *data, int addr_bits,
       word_buf[i] = HSPI.w[i];
   }
 
+  xSemaphoreGive(mtx);
+
   return len;
 }
 
@@ -146,6 +161,8 @@ size_t hspi_write(struct hspi *settings, size_t len, const void *data,
     user_reg |= SPI_USR_MOSI;
   if (addr_bits > 0)
     user_reg |= SPI_USR_ADDR;
+
+  xSemaphoreTake(mtx, portMAX_DELAY);
 
   // make sure the last operation is done
   while (HSPI.cmd & SPI_USR)
@@ -182,6 +199,8 @@ size_t hspi_write(struct hspi *settings, size_t len, const void *data,
   // start data transfer
   HSPI.cmd |= SPI_USR;
 
+  xSemaphoreGive(mtx);
+
   return len;
 }
 
@@ -205,15 +224,19 @@ static void apply_settings(struct hspi *settings, uint32_t user_reg) {
     break;
   }
 
+  uint32_t pin_reg = HSPI.pin & ~cs_mask;
   switch (settings->cs) {
+  case -1:
+    HSPI.pin = pin_reg | SPI_CS0_DIS | SPI_CS1_DIS | SPI_CS2_DIS;
+    break;
   case 0:
-    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS1_DIS | SPI_CS2_DIS;
+    HSPI.pin = pin_reg | SPI_CS1_DIS | SPI_CS2_DIS;
     break;
   case 1:
-    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS2_DIS;
+    HSPI.pin = pin_reg | SPI_CS0_DIS | SPI_CS2_DIS;
     break;
   case 2:
-    HSPI.pin = (HSPI.pin & ~cs_mask) | SPI_CS0_DIS | SPI_CS1_DIS;
+    HSPI.pin = pin_reg | SPI_CS0_DIS | SPI_CS1_DIS;
     break;
   }
 
@@ -221,4 +244,58 @@ static void apply_settings(struct hspi *settings, uint32_t user_reg) {
   const uint32_t clkcnt_h = settings->clock_div / 2 - 1;
   HSPI.clock = (clkcnt_n << SPI_CLKCNT_N_S) | (clkcnt_h << SPI_CLKCNT_H_S) |
                (clkcnt_n << SPI_CLKCNT_L_S);
+}
+
+#include "FreeRTOS.h"
+#include "esp/gpio.h"
+#include "task.h"
+
+uint32_t ads_read(int channel, bool single_ended) {
+  struct hspi settings = {
+      .mode = SPI_MODE_SPI,
+      .cs = -1,
+      .clock_div = 32 // 2.5 MHz
+  };
+  uint32_t user_reg = SPI_CS_SETUP | SPI_CS_HOLD | SPI_USR_MISO |
+                      SPI_CK_I_EDGE | SPI_USR_COMMAND | SPI_USR_DUMMY |
+                      SPI_RD_BYTE_ORDER;
+  uint8_t cmd = 0x83 | ((channel & 0x7) << 4) | (single_ended ? 0x4 : 0x0);
+
+#if 1
+
+  xSemaphoreTake(mtx, portMAX_DELAY);
+
+  // make sure the last operation is done
+  while (HSPI.cmd & SPI_USR)
+    ;
+
+  apply_settings(&settings, user_reg);
+
+  HSPI.user1 = 11 << SPI_USR_MISO_BITLEN_S; // 12 bits in
+  HSPI.user2 = (7 << SPI_USR_COMMAND_BITLEN_S) | cmd;
+
+  taskENTER_CRITICAL();
+
+  gpio_write(16, false);
+
+  // start data transfer and wait until completion
+  HSPI.cmd |= SPI_USR;
+  while (HSPI.cmd & SPI_USR)
+    ;
+
+  gpio_write(16, true);
+
+  taskEXIT_CRITICAL();
+
+  uint32_t val = HSPI.w[0];
+
+  xSemaphoreGive(mtx);
+
+  return val >> 20;
+
+#else
+
+  return 0;
+
+#endif
 }
