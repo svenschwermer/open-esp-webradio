@@ -57,7 +57,7 @@ static short *get_sample_buffer() {
  * Create a circular list of DMA descriptors
  */
 static inline void init_descriptors_list() {
-  memset(dma_buffer, 0, DMA_QUEUE_SIZE * DMA_BUFFER_SIZE);
+  memset(dma_buffer, 0, sizeof(dma_buffer));
 
   for (int i = 0; i < DMA_QUEUE_SIZE; i++) {
     dma_block_list[i].owner = 1;

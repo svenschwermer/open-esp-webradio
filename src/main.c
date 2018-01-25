@@ -31,21 +31,28 @@ void ui_task(void *p) {
 #endif
 
   for (int i = 0;; ++i) {
-    uint32_t x = ads_read(5, false);
-    uint32_t y = ads_read(1, false);
-    uint32_t z1 = ads_read(3, false);
-    uint32_t z2 = ads_read(4, false);
-    uint32_t p;
-    if (z1 > 0)
-      p = ((z2 - z1) * x) / z1;
-    else
-      p = UINT32_MAX;
+    vTaskDelay(2);
 
-    printf("free heap: %u\nfifo: %u/%u\nunderruns: %u\n"
-           "x=%u y=%u\nz1=%u z2=%u\npressure=%u\n\n",
+    uint32_t z1 = ads_read(3, false);
+    if (z1 > 200) {
+      uint32_t x = ads_read(5, false);
+      uint32_t y = ads_read(1, false);
+      printf("touch: (%u,%u)\n", x, y);
+    }
+
+    unsigned int underruns = get_and_reset_underrun_counter();
+    if (underruns)
+      printf("!!! %u underruns\n", underruns);
+
+#if 0
+    printf("free heap: %u\n"
+           "fifo: %u/%u\n"
+           "underruns: %u\n"
+           "z1=%u\n\n",
            xPortGetFreeHeapSize(), fifo_fill(), fifo_size(),
-           get_and_reset_underrun_counter(), x, y, z1, z2, p);
+           get_and_reset_underrun_counter(), z1);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
+#endif
   }
 
   vTaskDelete(NULL);
@@ -82,7 +89,6 @@ void user_init(void) {
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
 
-#if 0
   if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 4, &mp3_task_hndl) !=
       pdPASS) {
     printf("Failed to create mp3 task!\n");
@@ -94,7 +100,6 @@ void user_init(void) {
     printf("Failed to create stream task!\n");
     goto fail;
   }
-#endif
 
   if (xTaskCreate(ui_task, "UI", 2 * configMINIMAL_STACK_SIZE, NULL, 1, NULL) !=
       pdPASS) {
