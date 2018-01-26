@@ -50,3 +50,6 @@ Inspired by [ESP8266_MP3_DECODER](https://github.com/espressif/ESP8266_MP3_DECOD
 this project builds upon the following components:
 - [open-esp-webradio](https://github.com/SuperHouse/esp-open-rtos)
 - [libmad](https://www.underbit.com/products/mad)
+
+## License
+This project is licensed under the terms of the GNU GPLv3, see [LICENSE.md](LICENSE.md).
