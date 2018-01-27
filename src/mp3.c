@@ -1,5 +1,6 @@
 #include "mp3.h"
 #include "fifo.h"
+#include "wm8731.h"
 
 #include "i2s_dma/i2s_dma.h"
 
@@ -112,12 +113,20 @@ unsigned int get_and_reset_underrun_counter() {
   return underruns;
 }
 
-void set_dac_sample_rate(unsigned int sample_rate) {
-  static unsigned int last_sample_rate = 0;
+void set_frame_format(unsigned int sample_rate, unsigned short channels) {
+  static unsigned int last_sample_rate = 44100;
   if (sample_rate != last_sample_rate) {
     printf("new sample rate: %u kHz\n", sample_rate);
     last_sample_rate = sample_rate;
-    // wm8731_set_sample_rate(sample_rate);
+
+    wm8731_set_sample_rate(sample_rate);
+
+    // TODO: it's cleaner to clear the DMA queue and start over
+    i2s_clock_div_t clock_div = i2s_get_clock_div(sample_rate * channels * 16);
+    uint32_t i2s_conf = I2S.CONF & ~(I2S_CONF_BCK_DIV_M | I2S_CONF_CLKM_DIV_M);
+    i2s_conf |= (clock_div.bclk_div << I2S_CONF_BCK_DIV_S) |
+                (clock_div.clkm_div << I2S_CONF_CLKM_DIV_S);
+    I2S.CONF = i2s_conf;
   }
 }
 
@@ -189,7 +198,7 @@ void mp3_task(void *arg) {
 
   mad_stream_init(&stream);
   mad_frame_init(&frame);
-  mad_synth_init(&synth, get_sample_buffer);
+  mad_synth_init(&synth, get_sample_buffer, set_frame_format);
 
   i2s_clock_div_t clock_div = i2s_get_clock_div(44100 * 2 * 16);
   i2s_pins_t i2s_pins = {.data = true, .clock = true, .ws = true};
