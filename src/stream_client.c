@@ -1,24 +1,42 @@
 #include "stream_client.h"
+#include "common.h"
 #include "fifo.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "lwip/dns.h"
 #include "lwip/netdb.h"
+
+#include "lwip/dns.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 
 #include "espressif/esp_common.h"
 
+#include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
+
+enum response_parser_state {
+  INIT,
+  CR,
+  CRLF,
+  CRLFCR,
+  CONTENT,
+};
+
+static const char *stream_host;
+static const char *stream_path;
+static bool stop;
+static enum response_parser_state response_parser_state;
+static TaskHandle_t handle;
 
 static ssize_t send_http_request(int sock, const char *host, const char *path) {
   const char *req[] = {"GET ", path, " HTTP/1.0\r\nHost: ", host, "\r\n\r\n"};
 
   ssize_t written_total = 0;
-  for (int i = 0; i < sizeof(req) / sizeof(req[0]); ++i) {
+  for (int i = 0; i < ARRAY_SIZE(req); ++i) {
     const size_t len = strlen(req[i]);
     const ssize_t written = write(sock, req[i], len);
 
@@ -30,14 +48,6 @@ static ssize_t send_http_request(int sock, const char *host, const char *path) {
 
   return written_total;
 }
-
-static enum {
-  INIT,
-  CR,
-  CRLF,
-  CRLFCR,
-  CONTENT,
-} response_parser_state = INIT;
 
 // Quick & Dirty HTTP header parser, returns the number of leading header bytes
 static int process_response_header(const char *buf, int len) {
@@ -79,17 +89,7 @@ static int process_response_header(const char *buf, int len) {
   return len;
 }
 
-static unsigned int streamed_bytes_counter = 0;
-
-unsigned int get_and_reset_streamed_bytes() {
-  unsigned int bytes = streamed_bytes_counter;
-  streamed_bytes_counter = 0;
-  return bytes;
-}
-
-void stream_task(void *arg) {
-  struct stream_params *params = (struct stream_params *)arg;
-
+static void stream_task(void *arg) {
   const struct addrinfo hints = {
       .ai_family = AF_INET,
       .ai_socktype = SOCK_STREAM,
@@ -103,13 +103,13 @@ void stream_task(void *arg) {
     connection_status = sdk_wifi_station_get_connect_status();
   }
 
-  printf("Running DNS lookup for %s...\n", params->host);
-  int err = getaddrinfo(params->host, "80", &hints, &res);
+  printf("Running DNS lookup for %s...\n", stream_host);
+  int err = getaddrinfo(stream_host, "80", &hints, &res);
   if (err != 0 || res == NULL) {
     printf("DNS lookup failed err=%d res=%p\r\n", err, res);
     if (res)
       freeaddrinfo(res);
-    goto fail;
+    goto terminate_task;
   }
 
   /* Note: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r for "real" code */
@@ -120,7 +120,7 @@ void stream_task(void *arg) {
   if (s < 0) {
     printf("... Failed to allocate socket.\r\n");
     freeaddrinfo(res);
-    goto fail;
+    goto terminate_task;
   }
 
   printf("... allocated socket\r\n");
@@ -128,25 +128,26 @@ void stream_task(void *arg) {
   if (connect(s, res->ai_addr, res->ai_addrlen) != 0) {
     freeaddrinfo(res);
     printf("... socket connect failed.\r\n");
-    goto fail_close_socket;
+    goto close_socket;
   }
 
   printf("... connected\r\n");
   freeaddrinfo(res);
 
-  if (send_http_request(s, params->host, params->path) <= 0) {
+  if (send_http_request(s, stream_host, stream_path) <= 0) {
     printf("... sending http request failed\r\n");
-    goto fail_close_socket;
+    goto close_socket;
   }
   printf("... http request send success\r\n");
 
+  response_parser_state = INIT;
+
   int n;
   char buf[65];
-  while ((n = read(s, buf, sizeof buf - 1)) > 0) {
+  while (!stop && (n = read(s, buf, sizeof buf - 1)) > 0) {
     int header_bytes = process_response_header(buf, n);
     if (header_bytes < n) {
       fifo_enqueue(buf + header_bytes, n - header_bytes);
-      streamed_bytes_counter += n - header_bytes;
     }
     if (header_bytes > 0) {
       buf[header_bytes] = '\0';
@@ -154,8 +155,26 @@ void stream_task(void *arg) {
     }
   }
 
-fail_close_socket:
+close_socket:
   close(s);
-fail:
+terminate_task:
   vTaskDelete(NULL);
+}
+
+int stream_start(const char *host, const char *path) {
+  stream_host = host;
+  stream_path = path;
+  stop = false;
+
+  if (xTaskCreate(stream_task, "stream", 384, NULL, 3, &handle) != pdPASS)
+    return 1;
+
+  return 0;
+}
+
+void stream_stop(void) {
+  stop = true;
+  do {
+    vTaskDelay(1);
+  } while (eTaskGetState(handle) != eDeleted);
 }

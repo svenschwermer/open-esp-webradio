@@ -1,11 +1,10 @@
 #include "mi0283qt.h"
 #include "FreeRTOS.h"
+#include "common.h"
 #include "hspi.h"
 #include "lcd_font.h"
 #include "task.h"
 #include <string.h>
-
-#define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
 
 #define LCD_ID 0
 #define LCD_DATA ((0x72) | (LCD_ID << 2))
@@ -166,15 +165,17 @@ int lcd_string(int x, int y, const char *str) {
 int lcd_stringn(int x, int y, const char *str, size_t n) {
   lcd_xy_exchange(true);
   for (size_t i = 0; i < n; ++i, ++str) {
-    // x & y need to be flipped, because we disable xy exchange
+    // jump over non-printable characters
+    if (*str < FIRST_CHAR || *str >= FIRST_CHAR + CHAR_COUNT)
+      continue;
+
+    // x & y need to be flipped, because we enable xy exchange
     lcd_set_area(y, x, y + FONT_HEIGHT - 1, x + FONT_WIDTH + FONT_MARGIN - 1);
     wr_sram();
 
     int buf_pos = 0;
     for (int col = 0; col < FONT_WIDTH; ++col) {
-      uint8_t col_byte = 0xff;
-      if (*str >= FIRST_CHAR && *str < FIRST_CHAR + CHAR_COUNT)
-        col_byte = font[(*str - FIRST_CHAR) * FONT_WIDTH + col];
+      uint8_t col_byte = font[(*str - FIRST_CHAR) * FONT_WIDTH + col];
       for (int line = 0; line < FONT_HEIGHT; ++line) {
         if (col_byte & (1 << line))
           pixel_buffer[buf_pos] = RGB(63, 63, 63);

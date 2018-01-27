@@ -19,9 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 
-static struct stream_params stream_params = {.host = "r.ezbt.me",
-                                             .path = "/antenne"};
-static TaskHandle_t mp3_task_hndl, stream_task_hndl;
+static TaskHandle_t mp3_task_hndl;
 
 void ui_task(void *p) {
   for (int i = 0;; ++i) {
@@ -70,8 +68,8 @@ void user_init(void) {
     goto fail;
   }
 
-  if (xTaskCreate(stream_task, "producer", 384, &stream_params, 3,
-                  &stream_task_hndl) != pdPASS) {
+  if (stream_start("ndr-njoy-live.cast.addradio.de",
+                   "/ndr/njoy/live/mp3/128/stream.mp3")) {
     printf("Failed to create stream task!\n");
     goto fail;
   }

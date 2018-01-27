@@ -1,7 +1,6 @@
 #include "wm8731.h"
+#include "common.h"
 #include "i2c/i2c.h"
-
-#define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
 
 #define I2C_BUS 0
 #define I2C_SCL_PIN 5

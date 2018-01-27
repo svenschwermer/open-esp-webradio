@@ -1,5 +1,5 @@
 #include "hspi.h"
-#include "common_macros.h"
+#include "common.h"
 #include "espressif/esp8266/esp8266.h"
 #include "espressif/esp_common.h"
 
