@@ -4,8 +4,9 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "lwip/dns.h"
 #include "lwip/netdb.h"
+
+#include "lwip/dns.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
 
@@ -15,7 +16,8 @@
 #include <unistd.h>
 
 static ssize_t send_http_request(int sock, const char *host, const char *path) {
-  const char *req[] = {"GET ", path, " HTTP/1.0\r\nHost: ", host, "\r\n\r\n"};
+  const char *req[] = {"GET ", path, " HTTP/1.0\r\nHost: ", host,
+                       "\r\nIcy-MetaData: 1\r\n\r\n"};
 
   ssize_t written_total = 0;
   for (int i = 0; i < sizeof(req) / sizeof(req[0]); ++i) {
@@ -31,60 +33,68 @@ static ssize_t send_http_request(int sock, const char *host, const char *path) {
   return written_total;
 }
 
-static enum {
-  INIT,
-  CR,
-  CRLF,
-  CRLFCR,
-  CONTENT,
-} response_parser_state = INIT;
+// Parses the HTTP reply. Returns 0 on success.
+// Parses the metadata interval as advertised by the server via the
+// 'icy-metaint' header attribute. The result is written into the variable
+// pointed to by metaint. If the attribute cannot be found, the variable is set
+// to -1. metaint may be set to NULL. The payload read after the header is
+// enqueued into the FIFO and the length of said payload is written into the
+// variable pointed to by metapos.
+static int read_header(int socket, int *metaint, int *metapos) {
+  int ret = 1;
+  static const size_t buffer_size = 2048;
+  char *buffer = malloc(buffer_size);
+  if (buffer == NULL) {
+    printf("allocating header buffer failed\n");
+    goto out;
+  }
+  memset(buffer, 0, buffer_size);
 
-// Quick & Dirty HTTP header parser, returns the number of leading header bytes
-static int process_response_header(const char *buf, int len) {
-  if (response_parser_state == CONTENT)
-    return 0;
+  int n = read(socket, buffer, buffer_size - 1);
+  if (n <= 0) {
+    printf("receiving header lines failed\n");
+    goto free_buffer;
+  }
 
-  for (int i = 0; i < len; ++i) {
-    if (buf[i] == '\r') {
-      switch (response_parser_state) {
-      case INIT:
-        response_parser_state = CR;
-        break;
-      case CRLF:
-        response_parser_state = CRLFCR;
-        break;
-      default:
-        response_parser_state = CONTENT;
-        return i;
-      }
-    } else if (buf[i] == '\n') {
-      switch (response_parser_state) {
-      case CR:
-        response_parser_state = CRLF;
-        break;
-      case CRLFCR:
-        response_parser_state = CONTENT;
-        return i + 1;
-      default:
-        response_parser_state = CONTENT;
-        return i;
-      }
-    } else if (buf[i] >= 0x20 && buf[i] <= 0x7e) {
-      response_parser_state = INIT;
+  char *header_end = strstr(buffer, "\r\n\r\n");
+  if (header_end == NULL) {
+    printf("header too long\n");
+    goto free_buffer;
+  }
+  header_end[2] = '\0';
+  header_end += 4;
+
+  const char *status_code_pos = strchr(buffer, ' ');
+  if (status_code_pos == NULL || strncmp(status_code_pos + 1, "200", 3) != 0) {
+    *strstr(buffer, "\r\n") = '\0';
+    printf("invalid reply status: %s\n", buffer);
+    goto free_buffer;
+  }
+
+  puts(buffer);
+
+  if (metaint != NULL) {
+    const char *metaint_pos = strstr(buffer, "icy-metaint:");
+    if (metaint_pos != NULL && metaint_pos < header_end) {
+      char *line_end = strstr(metaint_pos, "\r\n");
+      *line_end = '\0';
+      *metaint = atoi(metaint_pos + 12);
     } else {
-      response_parser_state = CONTENT;
-      return i;
+      *metaint = -1;
     }
   }
-  return len;
-}
 
-static unsigned int streamed_bytes_counter = 0;
+  int header_len = header_end - buffer;
+  // fifo_enqueue(header_end, n - header_len);
+  if (metapos != NULL)
+    *metapos = n - header_len;
 
-unsigned int get_and_reset_streamed_bytes() {
-  unsigned int bytes = streamed_bytes_counter;
-  streamed_bytes_counter = 0;
-  return bytes;
+  ret = 0;
+
+free_buffer:
+  free(buffer);
+out:
+  return ret;
 }
 
 void stream_task(void *arg) {
@@ -97,60 +107,92 @@ void stream_task(void *arg) {
   struct addrinfo *res;
 
   printf("Waiting for DHCP...\n");
-  uint8_t connection_status = STATION_IDLE;
-  while (connection_status != STATION_GOT_IP) {
+  while (sdk_wifi_station_get_connect_status() != STATION_GOT_IP) {
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    connection_status = sdk_wifi_station_get_connect_status();
   }
 
-  printf("Running DNS lookup for %s...\n", params->host);
+  printf("Running DNS lookup for %s\n", params->host);
   int err = getaddrinfo(params->host, "80", &hints, &res);
   if (err != 0 || res == NULL) {
-    printf("DNS lookup failed err=%d res=%p\r\n", err, res);
+    printf("DNS lookup failed err=%d res=%p\n", err, res);
     if (res)
       freeaddrinfo(res);
     goto fail;
   }
 
-  /* Note: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r for "real" code */
+  // TODO: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r
   struct in_addr *addr = &((struct sockaddr_in *)res->ai_addr)->sin_addr;
-  printf("DNS lookup succeeded. IP=%s\r\n", inet_ntoa(*addr));
+  printf("DNS lookup succeeded. IP=%s\n", inet_ntoa(*addr));
 
   int s = socket(res->ai_family, res->ai_socktype, 0);
   if (s < 0) {
-    printf("... Failed to allocate socket.\r\n");
+    printf("Failed to allocate socket\n");
     freeaddrinfo(res);
     goto fail;
   }
 
-  printf("... allocated socket\r\n");
-
   if (connect(s, res->ai_addr, res->ai_addrlen) != 0) {
     freeaddrinfo(res);
-    printf("... socket connect failed.\r\n");
+    printf("Socket connect failed\n");
     goto fail_close_socket;
   }
-
-  printf("... connected\r\n");
   freeaddrinfo(res);
 
   if (send_http_request(s, params->host, params->path) <= 0) {
-    printf("... sending http request failed\r\n");
+    printf("Sending HTTP request failed\n");
     goto fail_close_socket;
   }
-  printf("... http request send success\r\n");
+
+  int metaint, metapos;
+  if (read_header(s, &metaint, &metapos) < 0) {
+    printf("Reading reply header failed\n");
+    goto fail_close_socket;
+  }
+
+  printf("metaint=%d metapos=%d\n", metaint, metapos);
 
   int n;
-  char buf[65];
-  while ((n = read(s, buf, sizeof buf - 1)) > 0) {
-    int header_bytes = process_response_header(buf, n);
-    if (header_bytes < n) {
-      fifo_enqueue(buf + header_bytes, n - header_bytes);
-      streamed_bytes_counter += n - header_bytes;
-    }
-    if (header_bytes > 0) {
-      buf[header_bytes] = '\0';
-      printf("%s", buf);
+  char buf[64];
+  // length of the metadata block in bytes excluding the length field
+  int meta_length = 0;
+  size_t read_next = sizeof(buf); // TODO
+  while ((n = read(s, buf, read_next)) > 0) {
+    if (metaint != -1) {
+      metapos += n;
+      if (metapos < metaint) {
+        // fifo_enqueue(buf, n);
+        read_next = (size_t)(metaint - metapos);
+      } else if (metapos == metaint) {
+        // we have reached the end of the payload,
+        // read metadata length field (1 byte) next
+        read_next = 1;
+      } else {
+        if (metapos == metaint + 1) {
+          // the first byte after a payload block tells us
+          // the length of the following metadata
+          meta_length = 16 * (*(const uint8_t *)buf);
+        } else {
+          // print complete buffer
+          for (int i = 0; i < n && buf[i] != '\0'; ++i) {
+            putchar(buf[i]);
+            if (buf[i] == ';')
+              putchar('\n');
+          }
+          meta_length -= n;
+        }
+        if (meta_length == 0) {
+          metapos = 0;
+          read_next = (size_t)(metaint - metapos);
+        } else {
+          read_next = (size_t)meta_length;
+        }
+      }
+
+      if (read_next > sizeof(buf)) {
+        read_next = sizeof(buf);
+      }
+    } else {
+      // fifo_enqueue(buf, n);
     }
   }
 
