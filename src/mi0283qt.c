@@ -1,11 +1,10 @@
 #include "mi0283qt.h"
 #include "FreeRTOS.h"
+#include "common.h"
 #include "hspi.h"
 #include "lcd_font.h"
 #include "task.h"
 #include <string.h>
-
-#define ARRAY_SIZE(x) ((sizeof(x)) / (sizeof((x)[0])))
 
 #define LCD_ID 0
 #define LCD_DATA ((0x72) | (LCD_ID << 2))
