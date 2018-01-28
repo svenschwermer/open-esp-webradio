@@ -1,4 +1,5 @@
 #include "stream_client.h"
+#include "common.h"
 #include "fifo.h"
 
 #include "FreeRTOS.h"
@@ -27,7 +28,7 @@ static ssize_t send_http_request(int sock, const char *host, const char *path) {
                        "\r\nIcy-MetaData: 1\r\n\r\n"};
 
   ssize_t written_total = 0;
-  for (int i = 0; i < sizeof(req) / sizeof(req[0]); ++i) {
+  for (int i = 0; i < ARRAY_SIZE(req); ++i) {
     const size_t len = strlen(req[i]);
     const ssize_t written = write(sock, req[i], len);
 
@@ -102,6 +103,96 @@ free_buffer:
   free(buffer);
 out:
   return ret;
+}
+
+static void parse_metadata(const char *s, int len) {
+  static enum { INIT, OTHER, ARTIST, TITLE } state = INIT;
+  static char buf[64];
+  static int buf_pos = 0;
+
+  while (len > 0) {
+    int available = sizeof(buf) - buf_pos;
+    if (available == 0) {
+      // If we run of out buffer space, we can't loop forever. If we're in the
+      // middle of parsing the artist or the title, we just termiate the string
+      // and use the incomplete string. That's probably better than skipping it
+      // altogether.
+      buf[sizeof(buf) - 1] = '\0';
+      switch (state) {
+      case ARTIST:
+        metadata_cb(STREAM_ARTIST, buf);
+        break;
+      case TITLE:
+        metadata_cb(STREAM_TITLE, buf);
+        break;
+      default:
+        break;
+      }
+      state = INIT;
+      available = sizeof(buf);
+      buf_pos = 0;
+    }
+    int n = min(len, available);
+    memcpy(buf + buf_pos, s, n);
+    buf_pos += n;
+    s += n;
+    len -= n;
+
+    // get rid of trailing zero bytes
+    while (buf_pos > 0 && buf[buf_pos - 1] == '\0')
+      --buf_pos;
+
+    // work on buf
+    char *next_start = buf;
+    do {
+      int distance = next_start - buf;
+      if (distance > 0) {
+        memmove(buf, next_start, sizeof(buf) - distance);
+        buf_pos -= distance;
+      }
+
+      switch (state) {
+      case INIT:
+        next_start = strnstr(buf, "='", buf_pos);
+        if (next_start) {
+          if (strncmp(buf, "StreamTitle", next_start - buf) == 0) {
+            state = ARTIST;
+          } else {
+            state = OTHER;
+          }
+          next_start += 2;
+        }
+        break;
+      case OTHER:
+        next_start = strnstr(buf, ";", buf_pos);
+        if (next_start) {
+          ++next_start;
+          state = INIT;
+        } else {
+          next_start = buf + buf_pos;
+        }
+        break;
+      case ARTIST:
+        next_start = strnstr(buf, " - ", buf_pos);
+        if (next_start) {
+          *next_start = '\0';
+          metadata_cb(STREAM_ARTIST, buf);
+          next_start += 3;
+          state = TITLE;
+        }
+        break;
+      case TITLE:
+        next_start = strnstr(buf, "';", buf_pos);
+        if (next_start) {
+          *next_start = '\0';
+          metadata_cb(STREAM_TITLE, buf);
+          next_start += 2;
+          state = INIT;
+        }
+        break;
+      }
+    } while (next_start && buf_pos > 0);
+  }
 }
 
 static void stream_task(void *arg) {
@@ -179,12 +270,7 @@ static void stream_task(void *arg) {
           // the length of the following metadata
           meta_length = 16 * (*(const uint8_t *)buf);
         } else {
-          // print complete buffer
-          for (int i = 0; i < n && buf[i] != '\0'; ++i) {
-            putchar(buf[i]);
-            if (buf[i] == ';')
-              putchar('\n');
-          }
+          parse_metadata(buf, n);
           meta_length -= n;
         }
         if (meta_length == 0) {

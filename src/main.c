@@ -38,7 +38,16 @@ static void stream_up(void) {
   }
 }
 
-static void stream_metadata(const char *s) { puts(s); }
+static void stream_metadata(enum stream_metadata type, const char *s) {
+  switch (type) {
+  case STREAM_ARTIST:
+    printf("Artist: %s\n", s);
+    break;
+  case STREAM_TITLE:
+    printf("Title: %s\n", s);
+    break;
+  }
+}
 
 void user_init(void) {
   int ret;
