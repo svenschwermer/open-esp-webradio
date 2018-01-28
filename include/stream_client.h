@@ -1,15 +1,11 @@
 #ifndef STREAM_CLIENT_H_
 #define STREAM_CLIENT_H_
 
-#include <stdint.h>
+typedef void (*stream_up_cb)(void);
+typedef void (*stream_metadata_cb)(const char *);
 
-struct stream_params
-{
-    const char *host;
-    const char *path;
-};
-
-void stream_task(void *arg);
-unsigned int get_and_reset_streamed_bytes(void);
+int stream_start(const char *host, const char *path, stream_up_cb up,
+                 stream_metadata_cb meta);
+void stream_stop(void);
 
 #endif /* STREAM_CLIENT_H_ */

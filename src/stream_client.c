@@ -15,6 +15,13 @@
 #include <string.h>
 #include <unistd.h>
 
+static const char *stream_host;
+static const char *stream_path;
+static stream_up_cb up_cb;
+static stream_metadata_cb metadata_cb;
+static bool stop;
+static TaskHandle_t handle;
+
 static ssize_t send_http_request(int sock, const char *host, const char *path) {
   const char *req[] = {"GET ", path, " HTTP/1.0\r\nHost: ", host,
                        "\r\nIcy-MetaData: 1\r\n\r\n"};
@@ -85,7 +92,7 @@ static int read_header(int socket, int *metaint, int *metapos) {
   }
 
   int header_len = header_end - buffer;
-  // fifo_enqueue(header_end, n - header_len);
+  fifo_enqueue(header_end, n - header_len);
   if (metapos != NULL)
     *metapos = n - header_len;
 
@@ -97,9 +104,7 @@ out:
   return ret;
 }
 
-void stream_task(void *arg) {
-  struct stream_params *params = (struct stream_params *)arg;
-
+static void stream_task(void *arg) {
   const struct addrinfo hints = {
       .ai_family = AF_INET,
       .ai_socktype = SOCK_STREAM,
@@ -111,13 +116,13 @@ void stream_task(void *arg) {
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }
 
-  printf("Running DNS lookup for %s\n", params->host);
-  int err = getaddrinfo(params->host, "80", &hints, &res);
+  printf("Running DNS lookup for %s\n", stream_host);
+  int err = getaddrinfo(stream_host, "80", &hints, &res);
   if (err != 0 || res == NULL) {
     printf("DNS lookup failed err=%d res=%p\n", err, res);
     if (res)
       freeaddrinfo(res);
-    goto fail;
+    goto terminate_task;
   }
 
   // TODO: inet_ntoa is non-reentrant, look at ipaddr_ntoa_r
@@ -128,41 +133,43 @@ void stream_task(void *arg) {
   if (s < 0) {
     printf("Failed to allocate socket\n");
     freeaddrinfo(res);
-    goto fail;
+    goto terminate_task;
   }
 
   if (connect(s, res->ai_addr, res->ai_addrlen) != 0) {
     freeaddrinfo(res);
     printf("Socket connect failed\n");
-    goto fail_close_socket;
+    goto close_socket;
   }
   freeaddrinfo(res);
 
-  if (send_http_request(s, params->host, params->path) <= 0) {
+  if (send_http_request(s, stream_host, stream_path) <= 0) {
     printf("Sending HTTP request failed\n");
-    goto fail_close_socket;
+    goto close_socket;
   }
 
-  int metaint, metapos;
+  int metaint = -1, metapos = -1;
   if (read_header(s, &metaint, &metapos) < 0) {
     printf("Reading reply header failed\n");
-    goto fail_close_socket;
+    goto close_socket;
   }
-
   printf("metaint=%d metapos=%d\n", metaint, metapos);
+
+  up_cb();
 
   int n;
   char buf[64];
   // length of the metadata block in bytes excluding the length field
   int meta_length = 0;
   size_t read_next = sizeof(buf); // TODO
-  while ((n = read(s, buf, read_next)) > 0) {
+  while (!stop && (n = read(s, buf, read_next)) > 0) {
     if (metaint != -1) {
       metapos += n;
       if (metapos < metaint) {
-        // fifo_enqueue(buf, n);
+        fifo_enqueue(buf, n);
         read_next = (size_t)(metaint - metapos);
       } else if (metapos == metaint) {
+        fifo_enqueue(buf, n);
         // we have reached the end of the payload,
         // read metadata length field (1 byte) next
         read_next = 1;
@@ -192,12 +199,33 @@ void stream_task(void *arg) {
         read_next = sizeof(buf);
       }
     } else {
-      // fifo_enqueue(buf, n);
+      fifo_enqueue(buf, n);
     }
   }
 
-fail_close_socket:
+close_socket:
   close(s);
-fail:
+terminate_task:
   vTaskDelete(NULL);
+}
+
+int stream_start(const char *host, const char *path, stream_up_cb up,
+                 stream_metadata_cb meta) {
+  stream_host = host;
+  stream_path = path;
+  up_cb = up;
+  metadata_cb = meta;
+  stop = false;
+
+  if (xTaskCreate(stream_task, "stream", 384, NULL, 3, &handle) != pdPASS)
+    return 1;
+
+  return 0;
+}
+
+void stream_stop(void) {
+  stop = true;
+  do {
+    vTaskDelay(1);
+  } while (eTaskGetState(handle) != eDeleted);
 }
