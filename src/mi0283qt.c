@@ -81,8 +81,11 @@ static inline void wr_sram(void) {
 
 static inline void wr_pixels(size_t count, const uint16_t *pixels) {
   size_t rem_bytes = count * sizeof(pixels[0]);
-  while (rem_bytes > 0)
-    rem_bytes -= hspi_write(&hspi, rem_bytes, pixels, 0, 0, 8, LCD_DATA);
+  while (rem_bytes > 0) {
+    size_t written = hspi_write(&hspi, rem_bytes, pixels, 0, 0, 8, LCD_DATA);
+    rem_bytes -= written;
+    pixels += written / sizeof(pixels[0]);
+  }
 }
 
 int lcd_init() {
@@ -213,15 +216,24 @@ void lcd_scroll_on(uint16_t top_fixed, uint16_t bottom_fixed) {
   wr_cmd(0x10, scroll_height >> 8);
   wr_cmd(0x11, scroll_height & 0xff);
 
-  // Vertical scroll button fixed area register
+  // Vertical scroll bottom fixed area register
   wr_cmd(0x12, bottom_fixed >> 8);
   wr_cmd(0x13, bottom_fixed & 0xff);
 
   wr_cmd(0x01, 0x08); // SCROLL=1
 }
 
+void lcd_scroll_off(void) {
+  wr_cmd(0x01, 0x00); // SCROLL=0
+}
+
 void lcd_scroll(uint16_t lines) {
   // Vertical scroll start address register
   wr_cmd(0x14, lines >> 8);
   wr_cmd(0x15, lines & 0xff);
+}
+
+void lcd_image(uint16_t x, uint16_t y, const struct image *img) {
+  lcd_set_area(x, y, x + img->width - 1, y + img->height - 1);
+  lcd_write_pixels(img->width * img->height, img->pixels);
 }

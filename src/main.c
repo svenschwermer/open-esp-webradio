@@ -1,3 +1,4 @@
+#include "ads7846.h"
 #include "fifo.h"
 #include "hspi.h"
 #include "mi0283qt.h"
@@ -21,19 +22,31 @@
 #include <string.h>
 
 void ui_task(void *p) {
-#if 1
-  gpio_write(16, true);
-  gpio_enable(16, GPIO_OUTPUT);
-#endif
+  ads_init();
+
+  extern const struct image img_arrow_left;
+  lcd_image(0, 0, &img_arrow_left);
+  extern const struct image img_arrow_right;
+  lcd_image(LCD_WIDTH - img_arrow_right.width, 0, &img_arrow_right);
+  extern const struct image img_standby;
+  lcd_image(0, 192, &img_standby);
+  extern const struct image img_settings;
+  lcd_image(48, 192, &img_settings);
+  extern const struct image img_play;
+  lcd_image(96, 192, &img_play);
+  extern const struct image img_vol_minus;
+  lcd_image(144, 192, &img_vol_minus);
+  extern const struct image img_vol_plus;
+  lcd_image(192, 192, &img_vol_plus);
 
   for (int i = 0;; ++i) {
     vTaskDelay(2);
 
-    uint32_t z1 = ads_read(3, false);
-    if (z1 > 200) {
-      uint32_t x = ads_read(5, false);
-      uint32_t y = ads_read(1, false);
-      printf("touch: (%u,%u)\n", x, y);
+    if (ads_poll(NULL, NULL)) {
+
+      // lcd_scroll_off();
+      // ads_calibrate();
+      // lcd_scroll_on(0, 0);
     }
 
     unsigned int underruns = get_and_reset_underrun_counter();

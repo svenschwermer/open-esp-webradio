@@ -11,7 +11,7 @@
 
 #define COL_WIDTH (FONT_WIDTH + FONT_MARGIN)
 #define LINE_HEIGHT (FONT_HEIGHT + FONT_MARGIN)
-#define Y_START 0 // (LCD_HEIGHT * 3 / 4)
+#define Y_START (LCD_HEIGHT * 3 / 4)
 
 static uint16_t x, y;
 
