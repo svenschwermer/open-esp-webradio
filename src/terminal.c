@@ -11,6 +11,7 @@
 
 #define COL_WIDTH (FONT_WIDTH + FONT_MARGIN)
 #define LINE_HEIGHT (FONT_HEIGHT + FONT_MARGIN)
+#define Y_START 0 // (LCD_HEIGHT * 3 / 4)
 
 static uint16_t x, y;
 
@@ -19,10 +20,10 @@ static ssize_t term_stdout(struct _reent *r, int fd, const void *ptr,
 
 void term_init(void) {
   x = 0;
-  y = 0;
+  y = Y_START;
 
-  lcd_fill(RGB(0, 0, 0));
-  lcd_scroll_on(0, 0);
+  lcd_rect(RGB(0, 0, 0), 0, Y_START, LCD_WIDTH - 1, LCD_HEIGHT - 1);
+  lcd_scroll_on(Y_START, 0);
   set_write_stdout(term_stdout);
   printf("Terminal ok\n");
 }
@@ -49,7 +50,9 @@ static ssize_t term_stdout(struct _reent *r, int fd, const void *ptr,
 
     if (line_feed) {
       x = 0;
-      y = (y + LINE_HEIGHT) % LCD_HEIGHT;
+      y = (y + LINE_HEIGHT);
+      if (y >= LCD_HEIGHT)
+        y = Y_START;
       lcd_scroll(y);
     }
 

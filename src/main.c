@@ -20,10 +20,6 @@
 #include <stdio.h>
 #include <string.h>
 
-static struct stream_params stream_params = {.host = "r.ezbt.me",
-                                             .path = "/antenne"};
-static TaskHandle_t mp3_task_hndl, stream_task_hndl;
-
 void ui_task(void *p) {
 #if 1
   gpio_write(16, true);
@@ -45,17 +41,30 @@ void ui_task(void *p) {
       printf("!!! %u underruns\n", underruns);
 
 #if 0
-    printf("free heap: %u\n"
-           "fifo: %u/%u\n"
-           "underruns: %u\n"
-           "z1=%u\n\n",
+    printf("free heap: %u\nfifo: %u/%u\nunderruns: %u\n\n",
            xPortGetFreeHeapSize(), fifo_fill(), fifo_size(),
-           get_and_reset_underrun_counter(), z1);
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
+           get_and_reset_underrun_counter());
 #endif
   }
 
   vTaskDelete(NULL);
+}
+
+static void stream_up(void) {
+  if (xTaskCreate(mp3_task, "decode", 2100, NULL, 4, NULL) != pdPASS) {
+    printf("Failed to create mp3 task!\n");
+  }
+}
+
+static void stream_metadata(enum stream_metadata type, const char *s) {
+  switch (type) {
+  case STREAM_ARTIST:
+    printf("Artist: %s\n", s);
+    break;
+  case STREAM_TITLE:
+    printf("Title: %s\n", s);
+    break;
+  }
 }
 
 void user_init(void) {
@@ -89,14 +98,7 @@ void user_init(void) {
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
 
-  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 4, &mp3_task_hndl) !=
-      pdPASS) {
-    printf("Failed to create mp3 task!\n");
-    goto fail;
-  }
-
-  if (xTaskCreate(stream_task, "producer", 384, &stream_params, 3,
-                  &stream_task_hndl) != pdPASS) {
+  if (stream_start("r.ezbt.me", "/antenne", stream_up, stream_metadata)) {
     printf("Failed to create stream task!\n");
     goto fail;
   }

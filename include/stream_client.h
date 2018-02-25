@@ -1,15 +1,13 @@
 #ifndef STREAM_CLIENT_H_
 #define STREAM_CLIENT_H_
 
-#include <stdint.h>
+enum stream_metadata { STREAM_ARTIST, STREAM_TITLE };
 
-struct stream_params
-{
-    const char *host;
-    const char *path;
-};
+typedef void (*stream_up_cb)(void);
+typedef void (*stream_metadata_cb)(enum stream_metadata type, const char *);
 
-void stream_task(void *arg);
-unsigned int get_and_reset_streamed_bytes(void);
+int stream_start(const char *host, const char *path, stream_up_cb up,
+                 stream_metadata_cb meta);
+void stream_stop(void);
 
 #endif /* STREAM_CLIENT_H_ */
