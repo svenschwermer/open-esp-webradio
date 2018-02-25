@@ -19,17 +19,34 @@
 #include <stdio.h>
 #include <string.h>
 
-static TaskHandle_t mp3_task_hndl;
-
 void ui_task(void *p) {
   for (int i = 0;; ++i) {
+#if 0
     printf("free heap: %u\nfifo: %u/%u\nunderruns: %u\n\n",
            xPortGetFreeHeapSize(), fifo_fill(), fifo_size(),
            get_and_reset_underrun_counter());
+#endif
     vTaskDelay(2000 / portTICK_PERIOD_MS);
   }
 
   vTaskDelete(NULL);
+}
+
+static void stream_up(void) {
+  if (xTaskCreate(mp3_task, "decode", 2100, NULL, 4, NULL) != pdPASS) {
+    printf("Failed to create mp3 task!\n");
+  }
+}
+
+static void stream_metadata(enum stream_metadata type, const char *s) {
+  switch (type) {
+  case STREAM_ARTIST:
+    printf("Artist: %s\n", s);
+    break;
+  case STREAM_TITLE:
+    printf("Title: %s\n", s);
+    break;
+  }
 }
 
 void user_init(void) {
@@ -62,14 +79,7 @@ void user_init(void) {
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
 
-  if (xTaskCreate(mp3_task, "consumer", 2100, NULL, 4, &mp3_task_hndl) !=
-      pdPASS) {
-    printf("Failed to create mp3 task!\n");
-    goto fail;
-  }
-
-  if (stream_start("ndr-njoy-live.cast.addradio.de",
-                   "/ndr/njoy/live/mp3/128/stream.mp3")) {
+  if (stream_start("r.ezbt.me", "/antenne", stream_up, stream_metadata)) {
     printf("Failed to create stream task!\n");
     goto fail;
   }

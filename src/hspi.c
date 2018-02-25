@@ -29,7 +29,6 @@ struct spi_regs {
 };
 
 static void apply_settings(struct hspi *hspi, uint32_t user_reg);
-static inline int min(int a, int b) { return (a < b) ? a : b; }
 
 // The following SPI controller instances are located using the linker script.
 extern volatile struct spi_regs SPI;  // aka SPI0, used for the flash mememry
