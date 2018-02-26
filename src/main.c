@@ -22,14 +22,13 @@
 #include <stdio.h>
 #include <string.h>
 
-static void btn_prev_channel(void) { printf("Button: previous channel\n"); }
-static void btn_next_channel(void) { printf("Button: next channel\n"); }
+static void btn_prev_channel(void);
+static void btn_next_channel(void);
 static void btn_standby(void) { printf("Button: standby\n"); }
 static void btn_settings(void) { printf("Button: settings\n"); }
 static void btn_play_pause(void);
-static void btn_vol_minus(void) { printf("Button: vol -\n"); }
-static void btn_vol_plus(void) { printf("Button: vol +\n"); }
-
+static void btn_vol_minus(void);
+static void btn_vol_plus(void);
 extern const struct image img_arrow_left;
 extern const struct image img_arrow_right;
 extern const struct image img_standby;
@@ -37,7 +36,8 @@ extern const struct image img_settings;
 extern const struct image img_play;
 extern const struct image img_vol_minus;
 extern const struct image img_vol_plus;
-const struct button {
+
+static const struct button {
   uint16_t pos_x;
   uint16_t pos_y;
   const struct image *face;
@@ -50,6 +50,16 @@ const struct button {
     {96, 192, &img_play, btn_play_pause},
     {144, 192, &img_vol_minus, btn_vol_minus},
     {192, 192, &img_vol_plus, btn_vol_plus},
+};
+
+static const struct channel {
+  const char *name;
+  const char *host;
+  const char *path;
+} channels[] = {
+    {"N-JOY", "ndr-njoy-live.cast.addradio.de",
+     "/ndr/njoy/live/mp3/128/stream.mp3"},
+    {"Antenne Bayern", "r.ezbt.me", "/antenne"},
 };
 
 void ui_draw_buttons(void) {
@@ -113,11 +123,51 @@ static void stream_metadata(enum stream_metadata type, const char *s) {
   }
 }
 
+static bool paused = true;
+static int channel = 0;
+static int vol = -40;
+
+static void btn_prev_channel(void) {
+  printf("Button: previous channel\n");
+
+  if (!paused) {
+    mp3_stop();
+    stream_stop();
+  }
+
+  if (--channel < 0)
+    channel = ARRAY_SIZE(channels) - 1;
+
+  const struct channel *c = channels + channel;
+  if (stream_start(c->host, c->path, stream_up, stream_metadata))
+    printf("Failed to create stream task!\n");
+  else
+    paused = false;
+}
+
+static void btn_next_channel(void) {
+  printf("Button: next channel\n");
+
+  if (!paused) {
+    mp3_stop();
+    stream_stop();
+  }
+
+  if (++channel >= ARRAY_SIZE(channels))
+    channel = 0;
+
+  const struct channel *c = channels + channel;
+  if (stream_start(c->host, c->path, stream_up, stream_metadata))
+    printf("Failed to create stream task!\n");
+  else
+    paused = false;
+}
+
 static void btn_play_pause(void) {
-  static bool paused = true;
   printf("Button: play/pause\n");
   if (paused) {
-    if (stream_start("r.ezbt.me", "/antenne", stream_up, stream_metadata)) {
+    const struct channel *c = channels + channel;
+    if (stream_start(c->host, c->path, stream_up, stream_metadata)) {
       printf("Failed to create stream task!\n");
       return;
     }
@@ -128,6 +178,16 @@ static void btn_play_pause(void) {
     printf("Stream stopped\n");
   }
   paused = !paused;
+}
+
+static void btn_vol_minus(void) {
+  printf("Button: vol -\n");
+  wm8731_set_vol(--vol);
+}
+
+static void btn_vol_plus(void) {
+  printf("Button: vol +\n");
+  wm8731_set_vol(++vol);
 }
 
 void user_init(void) {
