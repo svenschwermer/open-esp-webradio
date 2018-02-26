@@ -226,6 +226,10 @@ static void mp3_task(void *arg) {
 
   i2s_dma_stop();
   vQueueDelete(dma_queue);
+
+  // clear FIFO so that the stream task unblocks and can be stopped
+  fifo_clear();
+
   vTaskDelete(NULL);
 }
 
