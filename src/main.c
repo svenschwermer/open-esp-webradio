@@ -1,4 +1,5 @@
 #include "ads7846.h"
+#include "common.h"
 #include "fifo.h"
 #include "hspi.h"
 #include "mi0283qt.h"
@@ -21,32 +22,64 @@
 #include <stdio.h>
 #include <string.h>
 
+static void btn_prev_channel(void) { printf("Button: previous channel\n"); }
+static void btn_next_channel(void) { printf("Button: next channel\n"); }
+static void btn_standby(void) { printf("Button: standby\n"); }
+static void btn_settings(void) { printf("Button: settings\n"); }
+static void btn_play_pause(void) { printf("Button: play/pause\n"); }
+static void btn_vol_minus(void) { printf("Button: vol -\n"); }
+static void btn_vol_plus(void) { printf("Button: vol +\n"); }
+
+extern const struct image img_arrow_left;
+extern const struct image img_arrow_right;
+extern const struct image img_standby;
+extern const struct image img_settings;
+extern const struct image img_play;
+extern const struct image img_vol_minus;
+extern const struct image img_vol_plus;
+const struct button {
+  uint16_t pos_x;
+  uint16_t pos_y;
+  const struct image *face;
+  void (*callback)(void);
+} buttons[] = {
+    {0, 0, &img_arrow_left, btn_prev_channel},
+    {200, 0, &img_arrow_right, btn_next_channel},
+    {0, 192, &img_standby, btn_standby},
+    {48, 192, &img_settings, btn_settings},
+    {96, 192, &img_play, btn_play_pause},
+    {144, 192, &img_vol_minus, btn_vol_minus},
+    {192, 192, &img_vol_plus, btn_vol_plus},
+};
+
+void ui_draw_buttons(void) {
+  for (int i = 0; i < ARRAY_SIZE(buttons); ++i) {
+    const struct button *b = buttons + i;
+    lcd_image(b->pos_x, b->pos_y, b->face);
+  }
+}
+
 void ui_task(void *p) {
   ads_init();
 
-  extern const struct image img_arrow_left;
-  lcd_image(0, 0, &img_arrow_left);
-  extern const struct image img_arrow_right;
-  lcd_image(LCD_WIDTH - img_arrow_right.width, 0, &img_arrow_right);
-  extern const struct image img_standby;
-  lcd_image(0, 192, &img_standby);
-  extern const struct image img_settings;
-  lcd_image(48, 192, &img_settings);
-  extern const struct image img_play;
-  lcd_image(96, 192, &img_play);
-  extern const struct image img_vol_minus;
-  lcd_image(144, 192, &img_vol_minus);
-  extern const struct image img_vol_plus;
-  lcd_image(192, 192, &img_vol_plus);
+  ads_calibrate(80);
+
+  ui_draw_buttons();
 
   for (int i = 0;; ++i) {
     vTaskDelay(2);
 
-    if (ads_poll(NULL, NULL)) {
-
-      // lcd_scroll_off();
-      // ads_calibrate();
-      // lcd_scroll_on(0, 0);
+    uint32_t x, y;
+    if (ads_poll(&x, &y)) {
+      for (int i = 0; i < ARRAY_SIZE(buttons); ++i) {
+        const struct button *b = buttons + i;
+        if (x < b->pos_x || x >= (b->pos_x + b->face->width))
+          continue;
+        if (y < b->pos_y || y >= (b->pos_y + b->face->height))
+          continue;
+        b->callback();
+      }
+      vTaskDelay(10);
     }
 
     unsigned int underruns = get_and_reset_underrun_counter();
