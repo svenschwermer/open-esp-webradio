@@ -59,6 +59,9 @@ static const struct channel {
 } channels[] = {
     {"N-JOY", "ndr-njoy-live.cast.addradio.de",
      "/ndr/njoy/live/mp3/128/stream.mp3"},
+    {"Deutschlandfunk", "st01.dlf.de", "/dlf/01/128/mp3/stream.mp3"},
+    {"alsterradio", "alster-de-hz-fal-stream03-cluster01.radiohost.de",
+     "/alsterradio_128"},
     {"Antenne Bayern", "r.ezbt.me", "/antenne"},
 };
 
@@ -127,57 +130,50 @@ static bool paused = true;
 static int channel = 0;
 static int vol = -40;
 
-static void btn_prev_channel(void) {
-  printf("Button: previous channel\n");
-
+static void play_channel(const struct channel *c) {
   if (!paused) {
     mp3_stop();
     stream_stop();
   }
-
-  if (--channel < 0)
-    channel = ARRAY_SIZE(channels) - 1;
-
-  const struct channel *c = channels + channel;
   if (stream_start(c->host, c->path, stream_up, stream_metadata))
     printf("Failed to create stream task!\n");
   else
     paused = false;
+
+  printf("Playing channel: %s\n", c->name);
+}
+
+static void btn_prev_channel(void) {
+  printf("Button: previous channel\n");
+
+  if (--channel < 0)
+    channel = ARRAY_SIZE(channels) - 1;
+
+  if (!paused)
+    play_channel(channels + channel);
 }
 
 static void btn_next_channel(void) {
   printf("Button: next channel\n");
 
-  if (!paused) {
-    mp3_stop();
-    stream_stop();
-  }
-
   if (++channel >= ARRAY_SIZE(channels))
     channel = 0;
 
-  const struct channel *c = channels + channel;
-  if (stream_start(c->host, c->path, stream_up, stream_metadata))
-    printf("Failed to create stream task!\n");
-  else
-    paused = false;
+  if (!paused)
+    play_channel(channels + channel);
 }
 
 static void btn_play_pause(void) {
   printf("Button: play/pause\n");
   if (paused) {
-    const struct channel *c = channels + channel;
-    if (stream_start(c->host, c->path, stream_up, stream_metadata)) {
-      printf("Failed to create stream task!\n");
-      return;
-    }
+    play_channel(channels + channel);
     printf("Stream started\n");
   } else {
     mp3_stop();
     stream_stop();
+    paused = true;
     printf("Stream stopped\n");
   }
-  paused = !paused;
 }
 
 static void btn_vol_minus(void) {
