@@ -22,6 +22,7 @@ static const char *stream_host;
 static const char *stream_path;
 static stream_up_cb up_cb;
 static stream_metadata_cb metadata_cb;
+static enum { INIT, OTHER, ARTIST, TITLE } meta_parser_state = INIT;
 static bool stop;
 static TaskHandle_t handle;
 
@@ -108,7 +109,6 @@ out:
 }
 
 static void parse_metadata(const char *s, int len) {
-  static enum { INIT, OTHER, ARTIST, TITLE } state = INIT;
   static char buf[64];
   static int buf_pos = 0;
 
@@ -120,7 +120,7 @@ static void parse_metadata(const char *s, int len) {
       // and use the incomplete string. That's probably better than skipping it
       // altogether.
       buf[sizeof(buf) - 1] = '\0';
-      switch (state) {
+      switch (meta_parser_state) {
       case ARTIST:
         metadata_cb(STREAM_ARTIST, buf);
         break;
@@ -130,7 +130,7 @@ static void parse_metadata(const char *s, int len) {
       default:
         break;
       }
-      state = INIT;
+      meta_parser_state = INIT;
       available = sizeof(buf);
       buf_pos = 0;
     }
@@ -153,14 +153,14 @@ static void parse_metadata(const char *s, int len) {
         buf_pos -= distance;
       }
 
-      switch (state) {
+      switch (meta_parser_state) {
       case INIT:
         next_start = strnstr(buf, "='", buf_pos);
         if (next_start) {
           if (strncmp(buf, "StreamTitle", next_start - buf) == 0) {
-            state = ARTIST;
+            meta_parser_state = ARTIST;
           } else {
-            state = OTHER;
+            meta_parser_state = OTHER;
           }
           next_start += 2;
         }
@@ -169,7 +169,7 @@ static void parse_metadata(const char *s, int len) {
         next_start = strnstr(buf, ";", buf_pos);
         if (next_start) {
           ++next_start;
-          state = INIT;
+          meta_parser_state = INIT;
         } else {
           next_start = buf + buf_pos;
         }
@@ -180,7 +180,7 @@ static void parse_metadata(const char *s, int len) {
           *next_start = '\0';
           metadata_cb(STREAM_ARTIST, buf);
           next_start += 3;
-          state = TITLE;
+          meta_parser_state = TITLE;
         }
         break;
       case TITLE:
@@ -189,7 +189,7 @@ static void parse_metadata(const char *s, int len) {
           *next_start = '\0';
           metadata_cb(STREAM_TITLE, buf);
           next_start += 2;
-          state = INIT;
+          meta_parser_state = INIT;
         }
         break;
       }
@@ -203,6 +203,8 @@ static void stream_task(void *arg) {
       .ai_socktype = SOCK_STREAM,
   };
   struct addrinfo *res;
+
+  fifo_clear();
 
   printf("Waiting for DHCP...\n");
   while (sdk_wifi_station_get_connect_status() != STATION_GOT_IP) {
@@ -303,6 +305,7 @@ int stream_start(const char *host, const char *path, stream_up_cb up,
   stream_path = path;
   up_cb = up;
   metadata_cb = meta;
+  meta_parser_state = INIT;
   stop = false;
 
   if (xTaskCreate(stream_task, "stream", 384, NULL, 3, &handle) != pdPASS)

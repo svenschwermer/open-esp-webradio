@@ -26,7 +26,7 @@ static void btn_prev_channel(void) { printf("Button: previous channel\n"); }
 static void btn_next_channel(void) { printf("Button: next channel\n"); }
 static void btn_standby(void) { printf("Button: standby\n"); }
 static void btn_settings(void) { printf("Button: settings\n"); }
-static void btn_play_pause(void) { printf("Button: play/pause\n"); }
+static void btn_play_pause(void);
 static void btn_vol_minus(void) { printf("Button: vol -\n"); }
 static void btn_vol_plus(void) { printf("Button: vol +\n"); }
 
@@ -97,7 +97,7 @@ void ui_task(void *p) {
 }
 
 static void stream_up(void) {
-  if (xTaskCreate(mp3_task, "decode", 2100, NULL, 4, NULL) != pdPASS) {
+  if (mp3_start()) {
     printf("Failed to create mp3 task!\n");
   }
 }
@@ -111,6 +111,23 @@ static void stream_metadata(enum stream_metadata type, const char *s) {
     printf("Title: %s\n", s);
     break;
   }
+}
+
+static void btn_play_pause(void) {
+  static bool paused = true;
+  printf("Button: play/pause\n");
+  if (paused) {
+    if (stream_start("r.ezbt.me", "/antenne", stream_up, stream_metadata)) {
+      printf("Failed to create stream task!\n");
+      return;
+    }
+    printf("Stream started\n");
+  } else {
+    mp3_stop();
+    stream_stop();
+    printf("Stream stopped\n");
+  }
+  paused = !paused;
 }
 
 void user_init(void) {
@@ -143,11 +160,6 @@ void user_init(void) {
   /* required to call wifi_set_opmode before station_set_config */
   sdk_wifi_set_opmode(STATION_MODE);
   sdk_wifi_station_set_config(&config);
-
-  if (stream_start("r.ezbt.me", "/antenne", stream_up, stream_metadata)) {
-    printf("Failed to create stream task!\n");
-    goto fail;
-  }
 
   if (xTaskCreate(ui_task, "UI", 2 * configMINIMAL_STACK_SIZE, NULL, 1, NULL) !=
       pdPASS) {

@@ -25,16 +25,18 @@ static dma_descriptor_t dma_block_list[DMA_QUEUE_SIZE];
 
 // Array of buffers for circular list of descriptors
 static uint8_t dma_buffer[DMA_QUEUE_SIZE][DMA_BUFFER_SIZE];
+static uint8_t *curr_dma_buf;
+static size_t curr_dma_pos;
 
 // Queue of empty DMA blocks
 static QueueHandle_t dma_queue;
 
-static unsigned int underrun_counter = 0;
+static unsigned int underrun_counter;
+static bool stop;
+static TaskHandle_t handle;
 
 static short *get_sample_buffer() {
   static const size_t sample_buffer_size = 128;
-  static uint8_t *curr_dma_buf = NULL;
-  static size_t curr_dma_pos = 0;
 
   if (curr_dma_buf == NULL) {
     // Get a free block from the DMA queue. This call will suspend the task
@@ -189,7 +191,7 @@ static void error(struct mad_stream *stream, struct mad_frame *frame) {
  * MAD_FLOW_STOP (to stop decoding) or MAD_FLOW_BREAK (to stop decoding and
  * signal an error).
  */
-void mp3_task(void *arg) {
+static void mp3_task(void *arg) {
   static struct mad_stream stream;
   static struct mad_frame frame;
   static struct mad_synth synth;
@@ -206,9 +208,9 @@ void mp3_task(void *arg) {
   init_descriptors_list();
   i2s_dma_start(dma_block_list);
 
-  while (1) {
+  while (!stop) {
     input(&stream);
-    while (1) {
+    while (!stop) {
       int r = mad_frame_decode(&frame, &stream);
       if (r == -1) {
         if (!MAD_RECOVERABLE(stream.error)) {
@@ -225,4 +227,21 @@ void mp3_task(void *arg) {
   i2s_dma_stop();
   vQueueDelete(dma_queue);
   vTaskDelete(NULL);
+}
+
+int mp3_start(void) {
+  curr_dma_buf = NULL;
+  curr_dma_pos = 0;
+  underrun_counter = 0;
+  stop = false;
+  if (xTaskCreate(mp3_task, "decode", 2100, NULL, 4, &handle) != pdPASS)
+    return 1;
+  return 0;
+}
+
+void mp3_stop(void) {
+  stop = true;
+  do {
+    vTaskDelay(1);
+  } while (eTaskGetState(handle) != eDeleted);
 }

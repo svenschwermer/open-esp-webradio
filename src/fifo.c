@@ -96,6 +96,21 @@ void fifo_dequeue(void *data, size_t len) {
   }
 }
 
+void fifo_clear(void) {
+  xSemaphoreTake(mtx, portMAX_DELAY);
+
+  write_pos = 0;
+  read_pos = 0;
+  fill = 0;
+
+  if (producer_waiting != NULL) {
+    xTaskNotifyGive(producer_waiting);
+    producer_waiting = NULL;
+  }
+
+  xSemaphoreGive(mtx);
+}
+
 size_t fifo_fill(void) {
   uint32_t ret;
   xSemaphoreTake(mtx, portMAX_DELAY);

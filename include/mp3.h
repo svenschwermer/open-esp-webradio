@@ -3,7 +3,8 @@
 
 #include <stdint.h>
 
-void mp3_task(void *arg);
+int mp3_start(void);
+void mp3_stop(void);
 unsigned int get_and_reset_underrun_counter(void);
 
 #endif /* MP3_H_ */
